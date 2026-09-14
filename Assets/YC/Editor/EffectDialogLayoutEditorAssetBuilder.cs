@@ -26,22 +26,10 @@ namespace YC.Editor
             public EffectDialogLayoutValues EffectDialog;
         }
 
-        [MenuItem("YC/Build/Effect Dialog Layout/Rebuild Profile")]
         public static void RebuildProfilesMenu()
         {
             RebuildProfilesOnlyForBuilder();
             Debug.Log("[EffectDialogLayoutEditorAssetBuilder] 已重建效果对话框布局 Profile。");
-        }
-
-        [MenuItem("YC/Build/Effect Dialog Layout/Rebuild Profile And Prefab")]
-        public static void RebuildProfilesAndPrefabsMenu()
-        {
-            RebuildProfilesOnlyForBuilder();
-            YC.EditorTools.GameplayDialogEditorAssetBuilder.RebuildEffectDialogOnly();
-            AssetDatabase.SaveAssets();
-            AssetDatabase.Refresh();
-            EffectDialogLayoutBuildReadiness.ValidateReadyForBuild();
-            Debug.Log("[EffectDialogLayoutEditorAssetBuilder] 已定向重建 EffectDialogShell 与布局 Profile。");
         }
 
         internal static void RebuildProfilesOnlyForBuilder()

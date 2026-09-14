@@ -48,6 +48,7 @@ namespace YC.Presentation
         private float nextAutoStartLocalMirrorAttemptTime;
         private string devLocalMirrorRoomOutputPath = string.Empty;
         private bool mapSelectionCreatesOnlineRoom;
+        private string configuredLocalMapSelectionTitle;
 
         private void Awake()
         {
@@ -403,6 +404,7 @@ namespace YC.Presentation
                 return false;
             }
 
+            configuredLocalMapSelectionTitle = view.MapSelectionPanel.TitleText.text;
             view.CoverImage.texture = coverTexture;
             BindStaticUi();
             view.HideRoomPanels();
@@ -496,7 +498,7 @@ namespace YC.Presentation
             view.HideRoomPanels();
             var panel = view.MapSelectionPanel;
             panel.gameObject.SetActive(true);
-            panel.TitleText.text = createsOnlineRoom ? "联机模式" : "单机模式";
+            panel.TitleText.text = createsOnlineRoom ? "联机模式" : configuredLocalMapSelectionTitle;
             mapSelectionCreatesOnlineRoom = createsOnlineRoom;
             RefreshMapSelection();
             roomPanel = panel.gameObject;

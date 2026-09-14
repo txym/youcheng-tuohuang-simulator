@@ -253,48 +253,6 @@ namespace YC.Tests.EditMode
         }
 
         [Test]
-        public void GameSettingsBuilderHelper_AttachesEventCharacterBootstrapToTemporaryRoot()
-        {
-            var facility = LoadAsset(
-                "Assets/YC/Presentation/Content/FacilityCardCatalog.asset",
-                "YC.Presentation.FacilityCardCatalog, Assembly-CSharp");
-            var content = LoadAsset(
-                "Assets/YC/Presentation/Content/CityStyleSpecialActionCatalog.asset",
-                "YC.Presentation.CityStyleSpecialActionCatalog, Assembly-CSharp");
-            var eventCharacter = AssetDatabase.LoadAssetAtPath(CatalogPath, CatalogType());
-            var theme = LoadAsset(
-                "Assets/YC/Presentation/Content/UiThemeCatalog.asset",
-                "YC.Presentation.UiThemeCatalog, Assembly-CSharp");
-            var builderType = Type.GetType(
-                "YC.EditorTools.GameSettingsMenuEditorAssetBuilder, Assembly-CSharp-Editor",
-                true);
-            var configure = builderType.GetMethod(
-                "ConfigureContentBootstraps",
-                BindingFlags.NonPublic | BindingFlags.Static);
-            Assert.That(configure, Is.Not.Null);
-
-            var root = new GameObject("Temporary GameSettings Root");
-            try
-            {
-                Assert.DoesNotThrow(() => configure.Invoke(
-                    null,
-                    new[] { root, facility, content, eventCharacter, theme }));
-                var bootstrapType = Type.GetType(
-                    "YC.Presentation.EventCharacterCatalogBootstrap, Assembly-CSharp",
-                    true);
-                var bootstraps = root.GetComponentsInChildren(bootstrapType, true);
-                Assert.That(bootstraps, Has.Length.EqualTo(1));
-                Assert.That(bootstraps[0].gameObject, Is.SameAs(root));
-                Assert.That(new SerializedObject(bootstraps[0]).FindProperty("catalog")
-                    .objectReferenceValue, Is.SameAs(eventCharacter));
-            }
-            finally
-            {
-                UnityEngine.Object.DestroyImmediate(root);
-            }
-        }
-
-        [Test]
         public void SceneYamlGate_AcceptsBaseAndRejectsDangerousOverrides()
         {
             const string prefabGuid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";

@@ -55,20 +55,9 @@ namespace YC.Editor
                 new List<MapScoreMarkerOffsetDefinition>();
         }
 
-        [MenuItem("YC/Build/Spatial Layout/Rebuild Assets")]
         public static void RebuildAssetsMenu()
         {
             RebuildAssets();
-        }
-
-        [MenuItem("YC/Build/Spatial Layout/Rebuild Assets And Configure Prefabs")]
-        public static void RebuildAssetsAndConfigurePrefabsMenu()
-        {
-            RebuildAssets();
-            YC.EditorTools.BuildInfoPanelEditorAssetBuilder.Rebuild();
-            YC.EditorTools.CityStyleDeclarationPreviewEditorAssetBuilder.Rebuild();
-            SpatialLayoutBuildReadiness.ValidateReadyForBuild();
-            Debug.Log("[SpatialLayoutEditorAssetBuilder] 已从锁定 manifest 重建空间布局资产并配置 Prefab。");
         }
 
         public static void RebuildAssets()
@@ -281,7 +270,8 @@ namespace YC.Editor
 
             var serializedLayout = new SerializedObject(layout);
             serializedLayout.FindProperty("influencePiecePrefab").objectReferenceValue =
-                AssetDatabase.LoadAssetAtPath<GameObject>(YC.EditorTools.MapViewEditorAssetBuilder.InfluencePiecePrefabPath);
+                AssetDatabase.LoadAssetAtPath<GameObject>(
+                    "Assets/YC/Presentation/Prefabs/Map/Pieces/InfluencePiece.prefab");
             serializedLayout.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(layout);
         }

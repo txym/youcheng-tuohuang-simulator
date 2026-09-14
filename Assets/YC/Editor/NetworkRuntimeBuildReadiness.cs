@@ -13,6 +13,11 @@ namespace YC.Editor
 {
     public static class NetworkRuntimeBuildReadiness
     {
+        private const string PrefabPath =
+            "Assets/YC/Presentation/Prefabs/Infrastructure/NetworkRuntimeRoot.prefab";
+        private const string StartScenePath = "Assets/Scenes/StartScene.unity";
+        private const string GameScenePath = "Assets/Scenes/SampleScene.unity";
+
         public static void ValidateReadyForBuild()
         {
             try
@@ -21,11 +26,11 @@ namespace YC.Editor
                 ValidateCanonicalPrefabIsUnique();
                 ValidateBuildSceneOrder();
                 ValidateScene(
-                    NetworkRuntimeEditorAssetBuilder.StartScenePath,
+                    StartScenePath,
                     identity,
                     1);
                 ValidateScene(
-                    NetworkRuntimeEditorAssetBuilder.GameScenePath,
+                    GameScenePath,
                     identity,
                     0);
                 ValidateProductionSourcesDoNotCreateCoreComponents();
@@ -44,7 +49,7 @@ namespace YC.Editor
         private static PrefabIdentity LoadAndValidatePrefab()
         {
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(
-                NetworkRuntimeEditorAssetBuilder.PrefabPath);
+                PrefabPath);
             if (prefab == null || !prefab.activeSelf ||
                 !AssetDatabase.Contains(prefab) || !AssetDatabase.IsMainAsset(prefab))
             {
@@ -122,7 +127,7 @@ namespace YC.Editor
             for (var i = 0; i < guids.Length; i++)
             {
                 var path = AssetDatabase.GUIDToAssetPath(guids[i]);
-                if (Normalize(path) == NetworkRuntimeEditorAssetBuilder.PrefabPath)
+                if (Normalize(path) == PrefabPath)
                 {
                     continue;
                 }
@@ -180,8 +185,8 @@ namespace YC.Editor
             }
 
             if (enabled.Count < 2 ||
-                enabled[0] != NetworkRuntimeEditorAssetBuilder.StartScenePath ||
-                !enabled.Contains(NetworkRuntimeEditorAssetBuilder.GameScenePath))
+                enabled[0] != StartScenePath ||
+                !enabled.Contains(GameScenePath))
             {
                 throw new InvalidOperationException(
                     "StartScene 必须是首个 enabled BuildSettings 场景，且 SampleScene 必须启用。");
@@ -458,7 +463,7 @@ namespace YC.Editor
                 var identity = new PrefabIdentity
                 {
                     PrefabGuid = AssetDatabase.AssetPathToGUID(
-                        NetworkRuntimeEditorAssetBuilder.PrefabPath),
+                        PrefabPath),
                     ScriptGuids = new string[components.Length]
                 };
                 if (string.IsNullOrEmpty(identity.PrefabGuid) ||

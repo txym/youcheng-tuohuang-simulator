@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEngine;
 using YC.Presentation;
@@ -25,19 +26,9 @@ namespace YC.Editor
             public EventChoiceDialogLayoutValues Values;
         }
 
-        [MenuItem("YC/Build/Event Choice Dialog Layout/Rebuild Profile")]
         public static void RebuildProfileMenu()
         {
             RebuildProfile();
-        }
-
-        [MenuItem("YC/Build/Event Choice Dialog Layout/Rebuild Profile And Dialog Prefab")]
-        public static void RebuildProfileAndDialogPrefabMenu()
-        {
-            RebuildProfile();
-            YC.EditorTools.GameplayDialogEditorAssetBuilder.RebuildEventChoiceDialogOnly();
-            EventChoiceDialogLayoutBuildReadiness.ValidateReadyForBuild();
-            Debug.Log("[EventChoiceDialogLayoutEditorAssetBuilder] 已重建布局 Profile 与 EventChoiceDialog Prefab。");
         }
 
         public static EventChoiceDialogLayoutProfile RebuildProfile()
@@ -149,7 +140,43 @@ namespace YC.Editor
 
         private static void EnsureControlledMetaGuid(string assetPath, string expectedGuid)
         {
-            EventChoiceDialogControlledMetaGuid.ValidateAsset(assetPath, expectedGuid);
+            if (string.IsNullOrEmpty(expectedGuid) ||
+                !Regex.IsMatch(
+                    expectedGuid,
+                    @"\A[0-9a-fA-F]{32}\z",
+                    RegexOptions.CultureInvariant))
+            {
+                throw new InvalidOperationException("受控资产预期 GUID 格式无效。");
+            }
+
+            var metaPath = Path.GetFullPath(assetPath + ".meta");
+            if (!File.Exists(metaPath))
+            {
+                throw new InvalidOperationException(
+                    "受控资产必须保留固定 GUID 的 meta 后才能创建或保存：" + metaPath);
+            }
+
+            var matches = Regex.Matches(
+                File.ReadAllText(metaPath),
+                @"(?m)^guid:[ \t]*(?<guid>[0-9a-fA-F]{32})[ \t]*\r?$",
+                RegexOptions.CultureInvariant);
+            if (matches.Count != 1 ||
+                !string.Equals(
+                    matches[0].Groups["guid"].Value,
+                    expectedGuid,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "受控资产 meta 必须且只能包含一条顶层 guid，且值必须精确匹配固定 GUID。");
+            }
+
+            var actualAssetGuid = AssetDatabase.AssetPathToGUID(assetPath);
+            if (string.IsNullOrEmpty(actualAssetGuid) ||
+                !string.Equals(actualAssetGuid, expectedGuid, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "AssetDatabase 中的受控资产实际 GUID 与固定 GUID 不一致。");
+            }
         }
 
         private static string ComputeSha256(string path)

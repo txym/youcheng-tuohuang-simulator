@@ -100,10 +100,10 @@ namespace YC.Presentation
             safeBand = new Color(0.82f, 0.78f, 0.67f, 0.95f);
             gameOverOverlay = new Color(0f, 0f, 0f, 0.62f);
             gameOverDialog = new Color(0.16f, 0.1f, 0.055f, 0.98f);
-            redPlayer = new Color(0.7019608f, 0f, 0.1137255f, 1f);
-            bluePlayer = new Color(0.003921569f, 0.2705882f, 0.6980392f, 1f);
-            greenPlayer = new Color(0.3764706f, 0.8235294f, 0.003921569f, 1f);
-            yellowPlayer = new Color(1f, 0.7450981f, 0f, 1f);
+            redPlayer = new Color(0.9254902f, 0f, 0f, 1f);
+            bluePlayer = new Color(0f, 0.4235294f, 1f, 1f);
+            greenPlayer = new Color(0.372549f, 0.8235294f, 0f, 1f);
+            yellowPlayer = new Color(1f, 0.7490196f, 0f, 1f);
             canvasReferenceResolution = new Vector2(1920f, 1080f);
             canvasMatchWidthOrHeight = 0.5f;
             dialogActionButtonSize = new Vector2(220f, 48f);

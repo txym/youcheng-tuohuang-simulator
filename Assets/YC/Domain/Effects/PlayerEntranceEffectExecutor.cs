@@ -68,13 +68,24 @@ namespace YC.Domain.Effects
             if (!candidates.Contains(location)) return EffectStepResult.Failed("entrance_location_unavailable");
             if (!context.Registry.HasEventHandler(RulesSubscriptionId))
                 throw new InvalidOperationException("未注册玩家入场规则处理器。");
+            var entranceLocation = map.GetLocation(location);
+            var entranceReward = entranceLocation.InitialEntranceReward;
+            var hasInitialEntranceReward = entranceReward != null &&
+                (entranceReward.Originium != 0 || entranceReward.OriginiumShard != 0 ||
+                 entranceReward.Iron != 0 || entranceReward.PureOriginium != 0 ||
+                 entranceReward.GoldVoucher != 0);
             player.CityLocationId = location;
+            // 三人地图等地图定义可以为首次合法入场点配置额外奖励；
+            // 候选已在提交前复验，因此奖励只会随本次入场 Effect 提交一次。
+            if (hasInitialEntranceReward)
+                player.Resources.Add(entranceReward);
             BuildFacilityService.EnsureInitialCoreCommandTower(context.State, player);
             if (!context.State.Map.OpenLocationIds.Contains(location)) context.State.Map.OpenLocationIds.Add(location);
             var payload = NormalizedValue.CreateObject(new List<NormalizedValueEntry>
             {
                 new NormalizedValueEntry { Name = "player", Value = NormalizedValue.CreateStableReference("player", "p" + player.PlayerId) },
-                new NormalizedValueEntry { Name = "resourcePoint", Value = NormalizedValue.CreateStableReference("location", location) }
+                new NormalizedValueEntry { Name = "resourcePoint", Value = NormalizedValue.CreateStableReference("location", location) },
+                new NormalizedValueEntry { Name = "initialEntranceRewardApplied", Value = NormalizedValue.CreateBoolean(hasInitialEntranceReward) }
             });
             context.Node.NormalizedResult = payload.Clone();
             return EffectStepResult.Continue("entered").AddEvent(new EffectEventRequest
@@ -89,9 +100,18 @@ namespace YC.Domain.Effects
         {
             var result = new List<string>();
             foreach (var location in map.Map.Locations)
-                if (location.CanDockCity && (map.Map.MapId != StaticMapDefinitions.FourPlayerMapId ||
-                    StaticMapDefinitions.FourPlayerInitialLocationIds.Contains(location.LocationId)) &&
-                    !state.Players.Exists(player => player.CityLocationId == location.LocationId)) result.Add(location.LocationId);
+            {
+                if (!location.CanDockCity)
+                    continue;
+                if (map.Map.MapId == StaticMapDefinitions.FourPlayerMapId &&
+                    !StaticMapDefinitions.FourPlayerInitialLocationIds.Contains(location.LocationId))
+                    continue;
+                if (map.Map.MapId == StaticMapDefinitions.ThreePlayerMapId &&
+                    location.EventColor != EventColor.Green)
+                    continue;
+                if (!state.Players.Exists(player => player.CityLocationId == location.LocationId))
+                    result.Add(location.LocationId);
+            }
             result.Sort(StringComparer.Ordinal);
             return result;
         }

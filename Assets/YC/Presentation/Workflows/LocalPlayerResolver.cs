@@ -1,4 +1,5 @@
 using System;
+using YC.Domain.CardFlows;
 using YC.Domain.Rules;
 using YC.Domain.State;
 
@@ -20,6 +21,34 @@ namespace YC.Presentation.Workflows
             if (!controlsCurrentPlayerLocally || state == null)
             {
                 return configuredLocalPlayerId;
+            }
+
+            // 新 Effect 交互所属玩家可能不是当前行动玩家；内部主链完成请求不应切换控制权。
+            if (state.EffectRuntime != null && state.EffectRuntime.InteractionRequests != null)
+            {
+                for (var i = 0; i < state.EffectRuntime.InteractionRequests.Count; i++)
+                {
+                    var request = state.EffectRuntime.InteractionRequests[i];
+                    if (request != null && request.Status == "open" &&
+                        !request.IsInternalMainlineInteraction() && request.AnsweringPlayerId > 0)
+                    {
+                        return request.AnsweringPlayerId;
+                    }
+                }
+            }
+
+            // 待选所属玩家可能不是当前行动玩家（例如多人雷蛇收尾）。
+            // 只切换同机控制权，不改动共享回合顺序；联机身份在上方保持不变。
+            var pendingChoice = CardFlowStateAdapter.GetPendingChoiceView(state);
+            if (pendingChoice != null)
+            {
+                return pendingChoice.PlayerId;
+            }
+
+            var pendingCharacter = state.PendingCharacterEffect;
+            if (pendingCharacter != null && pendingCharacter.IsValid())
+            {
+                return pendingCharacter.PlayerId;
             }
 
             if (state.Phase != GamePhase.ResourceCollection)

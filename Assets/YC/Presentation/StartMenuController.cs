@@ -40,6 +40,7 @@ namespace YC.Presentation
         private bool pendingRoomDisbanded;
         private bool pendingLobbyJoinRequested;
         private int selectedRoomPlayerCount = 4;
+        private int selectedLocalCityCount = 1;
         private bool loadingGame;
         private bool joiningRoom;
         private bool autoStartLocalMirrorGame;
@@ -47,6 +48,7 @@ namespace YC.Presentation
         private float nextAutoStartLocalMirrorAttemptTime;
         private string devLocalMirrorRoomOutputPath = string.Empty;
         private bool mapSelectionCreatesOnlineRoom;
+        private string configuredLocalMapSelectionTitle;
 
         private void Awake()
         {
@@ -158,7 +160,18 @@ namespace YC.Presentation
                     continue;
                 }
 
-                var result = LocalhostAutoplayRunner.RunToRound8Settlement(YC.Infrastructure.Lua.LuaContentCatalog.Register);
+                var playerCountText = GetCommandLineValue(args, "--yc-dev-player-count=");
+                var playerCount = 4;
+                if (!string.IsNullOrEmpty(playerCountText) &&
+                    (!int.TryParse(playerCountText, out playerCount) || (playerCount != 3 && playerCount != 4)))
+                {
+                    Debug.LogError("自动跑局人数仅支持3或4。");
+                    if (!UnityEngine.Application.isEditor) UnityEngine.Application.Quit(1);
+                    return true;
+                }
+                var result = LocalhostAutoplayRunner.RunToRound8Settlement(
+                    YC.Infrastructure.Lua.LuaContentCatalog.Register,
+                    playerCount);
                 if (result.Succeeded)
                 {
                     Debug.Log(result.Snapshot);
@@ -308,22 +321,24 @@ namespace YC.Presentation
                 return;
             }
 
-            var seats = new List<PlayerSeat>
+            var seats = new List<PlayerSeat>();
+            var colors = new[] { PlayerColor.Blue, PlayerColor.Red, PlayerColor.Green, PlayerColor.Yellow };
+            for (var i = 0; i < selectedLocalCityCount; i++)
             {
-                new PlayerSeat
+                seats.Add(new PlayerSeat
                 {
-                    PlayerId = 1,
-                    PlayerName = "Player 1",
-                    Color = PlayerColor.Blue,
+                    PlayerId = i + 1,
+                    PlayerName = "玩家 " + (i + 1),
+                    Color = colors[i],
                     LobbyMemberPresent = true,
                     TransportConnected = true,
                     IdentityVerified = true,
                     GameStateSynchronized = true,
                     IsReady = true
-                }
-            };
-
-            GameLaunchContext.Ensure().Configure(LaunchMode.Local, 1, CreateLocalGameSeedSource(), seats);
+                });
+            }
+            GameLaunchContext.Ensure().Configure(LaunchMode.Local, 1, CreateLocalGameSeedSource(), seats,
+                YC.Domain.Maps.StaticMapDefinitions.ForPlayerCount(selectedRoomPlayerCount).MapId);
             BeginMapSceneLoad();
         }
 
@@ -395,6 +410,7 @@ namespace YC.Presentation
                 return false;
             }
 
+            configuredLocalMapSelectionTitle = view.MapSelectionPanel.TitleText.text;
             view.CoverImage.texture = coverTexture;
             BindStaticUi();
             view.HideRoomPanels();
@@ -405,7 +421,8 @@ namespace YC.Presentation
         {
             BindButton(view.StartGameButton, ShowLocalMapSelectionPanel);
             YC.PlayerJourney.PlayerAutomationId.Attach(view.StartGameButton.gameObject, "start.local_game");
-            YC.PlayerJourney.PlayerAutomationId.Attach(view.MapSelectionPanel.FourPlayerButton.gameObject, "start.four_player_map");
+            // 地图选择已改为人数与地图轮换面板，确认按钮承担原四人地图按钮的自动化入口。
+            YC.PlayerJourney.PlayerAutomationId.Attach(view.MapSelectionPanel.StartButton.gameObject, "start.four_player_map");
             BindButton(view.OnlineModeButton, ShowOnlineModePanel);
             BindButton(view.AchievementsButton, ShowAchievementsPanel);
             BindButton(view.QuitGameButton, QuitGame);
@@ -419,8 +436,11 @@ namespace YC.Presentation
             BindButton(view.AchievementsPanel.CollectionRoomButton, EnterCollectionRoom);
             BindButton(view.AchievementsPanel.BackButton, HideRoomPanel);
 
-            view.MapSelectionPanel.ThreePlayerButton.onClick.RemoveAllListeners();
-            BindButton(view.MapSelectionPanel.FourPlayerButton, SelectFourPlayerMap);
+            BindButton(view.MapSelectionPanel.PreviousCountButton, () => ChangeLocalCityCount(-1));
+            BindButton(view.MapSelectionPanel.NextCountButton, () => ChangeLocalCityCount(1));
+            BindButton(view.MapSelectionPanel.PreviousMapButton, ToggleSelectedMap);
+            BindButton(view.MapSelectionPanel.NextMapButton, ToggleSelectedMap);
+            BindButton(view.MapSelectionPanel.StartButton, ConfirmSelectedMap);
             BindButton(view.MapSelectionPanel.BackButton, HideRoomPanel);
 
             BindButton(view.JoinPanel.PasteButton, PasteRoomCodeFromClipboard);
@@ -487,22 +507,40 @@ namespace YC.Presentation
             view.HideRoomPanels();
             var panel = view.MapSelectionPanel;
             panel.gameObject.SetActive(true);
-            panel.TitleText.text = createsOnlineRoom ? "选择联机地图" : "选择本地地图";
+            panel.TitleText.text = createsOnlineRoom ? "联机模式" : configuredLocalMapSelectionTitle;
             mapSelectionCreatesOnlineRoom = createsOnlineRoom;
+            RefreshMapSelection();
             roomPanel = panel.gameObject;
             joinRoomInput = null;
             roomStatusText = null;
         }
 
-        private void SelectFourPlayerMap()
+        private void ChangeLocalCityCount(int delta)
         {
-            if (mapSelectionCreatesOnlineRoom)
-            {
-                CreateStandardRoom();
-                return;
-            }
-
-            StartGame();
+            if (mapSelectionCreatesOnlineRoom || loadingGame) return;
+            selectedLocalCityCount = Mathf.Clamp(selectedLocalCityCount + delta, 1, selectedRoomPlayerCount);
+            RefreshMapSelection();
+        }
+        private void ToggleSelectedMap()
+        {
+            if (loadingGame) return;
+            selectedRoomPlayerCount = selectedRoomPlayerCount == 3 ? 4 : 3;
+            selectedLocalCityCount = Mathf.Min(selectedLocalCityCount, selectedRoomPlayerCount);
+            RefreshMapSelection();
+        }
+        private void RefreshMapSelection()
+        {
+            var panel = view.MapSelectionPanel;
+            panel.CountText.text = (mapSelectionCreatesOnlineRoom ? selectedRoomPlayerCount : selectedLocalCityCount).ToString();
+            panel.MapText.text = selectedRoomPlayerCount == 3 ? "三人地图" : "四人地图";
+            panel.PreviousCountButton.interactable = !mapSelectionCreatesOnlineRoom && selectedLocalCityCount > 1;
+            panel.NextCountButton.interactable = !mapSelectionCreatesOnlineRoom && selectedLocalCityCount < selectedRoomPlayerCount;
+        }
+        private void ConfirmSelectedMap()
+        {
+            if (loadingGame || SceneTransitionContext.IsTransitionInProgress) return;
+            if (mapSelectionCreatesOnlineRoom) CreateRoom();
+            else StartGame();
         }
 
         private void ShowJoinRoomPanel()
@@ -812,7 +850,9 @@ namespace YC.Presentation
 
         private void BeginMapSceneLoad()
         {
-            BeginSceneLoad(mapSceneName, "地图加载失败");
+            var context = GameLaunchContext.Instance;
+            var sceneName = context != null && context.MapId == YC.Domain.Maps.StaticMapDefinitions.ThreePlayerMapId ? "ThreePlayerScene" : mapSceneName;
+            BeginSceneLoad(sceneName, "地图加载失败");
         }
 
         private void BeginSceneLoad(string sceneName, string errorTitle)

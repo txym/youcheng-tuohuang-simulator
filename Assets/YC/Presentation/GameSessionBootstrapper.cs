@@ -41,7 +41,8 @@ namespace YC.Presentation
             bool useRightCardSmokeState = false,
             bool prepareSharedCityStyleSmokeState = false)
         {
-            var mapQuery = new MapQueryService(StaticMapDefinitions.CreateFourPlayerMap());
+            var mapQuery = new MapQueryService(StaticMapDefinitions.Resolve(
+                launchContext == null ? StaticMapDefinitions.FourPlayerMapId : launchContext.MapId));
             var launchMode = launchContext == null ? LaunchMode.Local : launchContext.Mode;
             var eventDeckSeed = GetEventDeckSeed(launchContext);
             var eventDeckService = new EventDeckService(eventDeckSeed);
@@ -71,7 +72,8 @@ namespace YC.Presentation
                 state.Decks,
                 EventCardDatabase.GetCardIds(YC.Domain.Rules.EventColor.Green),
                 EventCardDatabase.GetCardIds(YC.Domain.Rules.EventColor.Yellow),
-                EventCardDatabase.GetCardIds(YC.Domain.Rules.EventColor.Red));
+                EventCardDatabase.GetCardIds(YC.Domain.Rules.EventColor.Red),
+                mapQuery.Map.MapId == StaticMapDefinitions.ThreePlayerMapId ? 3 : 4);
 
             var resourceTokenService = new ResourceTokenService();
             var session = new GameSession(state);

@@ -28,21 +28,9 @@ namespace YC.Editor
             "Assets/YC/Presentation/Content/CharacterHandLayoutProfile.asset";
         public const string CharacterHandAssetGuid = "49dc093f8a269884aad1c54e85becb8f";
 
-        [MenuItem("YC/Build/Secondary Layout/Rebuild Assets")]
         public static void RebuildAssetsMenu()
         {
             RebuildAssets();
-        }
-
-        [MenuItem("YC/Build/Secondary Layout/Rebuild Assets And Configure Prefabs")]
-        public static void RebuildAssetsAndConfigurePrefabs()
-        {
-            RebuildAssets();
-            YC.EditorTools.CityStyleDeclarationPreviewEditorAssetBuilder.Rebuild();
-            YC.EditorTools.ViewerEditorAssetBuilder.RebuildViewerPrefabs();
-            YC.EditorTools.GameplayInteractionHudEditorAssetBuilder.Rebuild();
-            SecondaryLayoutBuildReadiness.ValidateReadyForBuild();
-            Debug.Log("[SecondaryLayoutEditorAssetBuilder] 已重建三份次级布局资产并显式接入 Prefab。");
         }
 
         public static void RebuildAssets()

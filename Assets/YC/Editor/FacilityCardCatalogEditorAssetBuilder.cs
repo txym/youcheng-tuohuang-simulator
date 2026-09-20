@@ -35,13 +35,6 @@ namespace YC.Editor
             RebuildCatalogAsset();
         }
 
-        [MenuItem("YC/Build/Facility Card Catalog/Rebuild Asset And Configure Prefab")]
-        public static void RebuildAssetAndConfigurePrefabMenu()
-        {
-            var catalog = RebuildCatalogAsset();
-            ConfigureGameSettingsPrefab(catalog);
-        }
-
         public static FacilityCardCatalog RebuildCatalogAsset()
         {
             var parsed = ParseSource();
@@ -62,54 +55,6 @@ namespace YC.Editor
             AssetDatabase.SaveAssets();
             AssetDatabase.ImportAsset(CatalogAssetPath, ImportAssetOptions.ForceUpdate);
             return LoadRequiredCatalog();
-        }
-
-        public static void ConfigureGameSettingsPrefab(FacilityCardCatalog catalog)
-        {
-            if (catalog == null)
-            {
-                throw new InvalidOperationException("无法配置 GameSettings Prefab：目录引用为空。");
-            }
-
-            if (!catalog.TryValidateConfiguration(out var reason))
-            {
-                throw new InvalidOperationException("无法配置 GameSettings Prefab：" + reason);
-            }
-
-            var root = PrefabUtility.LoadPrefabContents(GameSettingsPrefabPath);
-            if (root == null)
-            {
-                throw new InvalidOperationException("无法加载 GameSettings Prefab。" + GameSettingsPrefabPath);
-            }
-
-            try
-            {
-                var bootstraps = root.GetComponentsInChildren<FacilityCatalogBootstrap>(true);
-                if (bootstraps.Length > 1)
-                {
-                    throw new InvalidOperationException("GameSettings Prefab 中存在多个 FacilityCatalogBootstrap。");
-                }
-
-                var bootstrap = bootstraps.Length == 1
-                    ? bootstraps[0]
-                    : root.AddComponent<FacilityCatalogBootstrap>();
-                if (bootstrap.gameObject != root)
-                {
-                    throw new InvalidOperationException("FacilityCatalogBootstrap 必须位于 GameSettings Prefab 根对象。");
-                }
-
-                var serialized = new SerializedObject(bootstrap);
-                serialized.FindProperty("facilityCardCatalog").objectReferenceValue = catalog;
-                serialized.ApplyModifiedPropertiesWithoutUndo();
-                EditorUtility.SetDirty(bootstrap);
-                PrefabUtility.SaveAsPrefabAsset(root, GameSettingsPrefabPath);
-            }
-            finally
-            {
-                PrefabUtility.UnloadPrefabContents(root);
-            }
-
-            AssetDatabase.SaveAssets();
         }
 
         public static FacilityCardCatalog LoadRequiredCatalog()

@@ -11,7 +11,6 @@ namespace YC.EditorTools
         public const string AssetPath =
             "Assets/YC/Presentation/Sprites/SharedUiVisuals.asset";
 
-        [MenuItem("Tools/YC/Rebuild Shared UI Visual Assets")]
         public static void Rebuild()
         {
             BuildOrUpdate();

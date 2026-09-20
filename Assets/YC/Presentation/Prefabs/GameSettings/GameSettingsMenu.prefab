@@ -4483,9 +4483,17 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 6135314284799400981, guid: 34f7f46113ea89744bee68e92746b0c6, type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 8345873438466910408, guid: 34f7f46113ea89744bee68e92746b0c6, type: 3}
       propertyPath: m_Name
       value: RulebookViewer
+      objectReference: {fileID: 0}
+    - target: {fileID: 8345873438466910408, guid: 34f7f46113ea89744bee68e92746b0c6, type: 3}
+      propertyPath: m_IsActive
+      value: 1
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []

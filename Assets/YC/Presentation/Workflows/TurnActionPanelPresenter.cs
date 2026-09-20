@@ -284,6 +284,15 @@ namespace YC.Presentation.Workflows
             return true;
         }
 
+        private static int? GetPendingPlayerId(GameState state)
+        {
+            var choice = CardFlowStateAdapter.GetPendingChoiceView(state);
+            if (choice != null)
+                return choice.PlayerId;
+            var character = state.PendingCharacterEffect;
+            return character != null && character.IsValid() ? (int?)character.PlayerId : null;
+        }
+
         private InteractionMode ResolveDisplayedMode(
             GameState state,
             PlayerState player,
@@ -359,6 +368,9 @@ namespace YC.Presentation.Workflows
                     state.PendingCharacterEffect.ChoiceType ==
                     CharacterPendingChoiceTypes.LiskarmCleanupRemoval)
                 {
+                    if (state.PendingCharacterEffect.PlayerId != context.LocalPlayerId)
+                        return "结束阶段：等待玩家 " + state.PendingCharacterEffect.PlayerId + " 完成雷蛇影响力移除。";
+
                     return "结束阶段：雷蛇要求移除 1 个己方影响力。请点击地图上高亮的影响力；选择完成前不能结束本回合";
                 }
 

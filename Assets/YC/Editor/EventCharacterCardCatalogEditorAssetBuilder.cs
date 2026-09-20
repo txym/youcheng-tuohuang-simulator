@@ -38,13 +38,6 @@ namespace YC.Editor
             RebuildCatalogAsset();
         }
 
-        [MenuItem("YC/Build/Event & Character Card Catalog/Rebuild Asset And Configure Prefab")]
-        public static void RebuildAssetAndConfigurePrefabMenu()
-        {
-            var catalog = RebuildCatalogAsset();
-            ConfigureGameSettingsPrefab(catalog);
-        }
-
         public static EventCharacterCardCatalog RebuildCatalogAsset()
         {
             var parsed = ParseSource();
@@ -100,55 +93,6 @@ namespace YC.Editor
             }
 
             return catalog;
-        }
-
-        public static void ConfigureGameSettingsPrefab(EventCharacterCardCatalog catalog)
-        {
-            string reason = null;
-            if (catalog == null || !catalog.TryValidateConfiguration(out reason))
-            {
-                throw new InvalidOperationException(
-                    "无法配置 EventCharacterCatalogBootstrap：" +
-                    (reason ?? "目录引用为空。"));
-            }
-
-            var root = PrefabUtility.LoadPrefabContents(GameSettingsPrefabPath);
-            if (root == null)
-            {
-                throw new InvalidOperationException("无法加载 GameSettings Prefab。");
-            }
-
-            try
-            {
-                var bootstraps = root.GetComponentsInChildren<EventCharacterCatalogBootstrap>(true);
-                if (bootstraps.Length > 1)
-                {
-                    throw new InvalidOperationException(
-                        "GameSettings Prefab 中存在多个 EventCharacterCatalogBootstrap。");
-                }
-
-                var bootstrap = bootstraps.Length == 1
-                    ? bootstraps[0]
-                    : root.AddComponent<EventCharacterCatalogBootstrap>();
-                if (bootstrap.gameObject != root)
-                {
-                    throw new InvalidOperationException(
-                        "EventCharacterCatalogBootstrap 必须位于 GameSettings Prefab 根对象。");
-                }
-
-                bootstrap.enabled = true;
-                var serialized = new SerializedObject(bootstrap);
-                serialized.FindProperty("catalog").objectReferenceValue = catalog;
-                serialized.ApplyModifiedPropertiesWithoutUndo();
-                EditorUtility.SetDirty(bootstrap);
-                PrefabUtility.SaveAsPrefabAsset(root, GameSettingsPrefabPath);
-            }
-            finally
-            {
-                PrefabUtility.UnloadPrefabContents(root);
-            }
-
-            AssetDatabase.SaveAssets();
         }
 
         internal static IReadOnlyList<EventCardDefinition> ReadSourceEventsForTests()

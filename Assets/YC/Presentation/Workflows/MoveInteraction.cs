@@ -323,6 +323,8 @@ namespace YC.Presentation.Workflows
             }
 
             if (!location.CanDockCity ||
+                (mapQuery.Map.MapId == StaticMapDefinitions.ThreePlayerMapId &&
+                 location.EventColor != EventColor.Green) ||
                 (mapQuery.Map.MapId == StaticMapDefinitions.FourPlayerMapId &&
                  !StaticMapDefinitions.FourPlayerInitialLocationIds.Contains(locationId)))
             {

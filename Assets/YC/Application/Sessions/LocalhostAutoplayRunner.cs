@@ -29,7 +29,7 @@ namespace YC.Application.DevTools
     {
         public const string DefaultRoomId = "DEV_LOCALHOST_AUTOPLAY";
 
-        private static readonly string[] InitialLocations = { "G-01", "A-01", "A-02", "B-01" };
+        private static readonly string[] FourPlayerInitialLocations = { "G-01", "A-01", "A-02", "B-01" };
         private const int RequiredExploreSuccesses = 1;
         private const int RequiredMoveCitySuccesses = 1;
         private const int RequiredDispatchInfluenceSuccesses = 1;
@@ -37,7 +37,7 @@ namespace YC.Application.DevTools
         private const int RequiredOpponentRouteRecipientCollectionSuccesses = 1;
         private const int AutoplayCharacterPlayerId = 1;
         private const string AutoplayCharacterTemplateId = CharacterCardDatabase.Elysium;
-        private const int FormalSupplyBuildPlayerId = 4;
+        private static readonly string[] ThreePlayerInitialLocations = { "A-01", "A-02", "B-01" };
         private const string FormalSupplyBlueFacilityId = FacilityCardDatabase.TradeDistrict;
         private const string FormalSupplyRedFacilityId = FacilityCardDatabase.EquipmentWarehouse;
         private const int LevelTwoFixturePlayerId = 3;
@@ -58,10 +58,12 @@ namespace YC.Application.DevTools
 
         private static readonly int[] LevelTwoFixtureFacilitySlots = { 0, 3, 4, 6, 8 };
 
-        public static LocalhostAutoplayResult RunToRound8Settlement(Action<EffectRegistry> configureContentRules)
+        public static LocalhostAutoplayResult RunToRound8Settlement(
+            Action<EffectRegistry> configureContentRules,
+            int playerCount = 4)
         {
-            var map = StaticMapDefinitions.CreateFourPlayerMap();
-            var seats = CreateJoinedSeats();
+            var map = StaticMapDefinitions.ForPlayerCount(playerCount);
+            var seats = CreateJoinedSeats(playerCount);
             var eventDeckSeed = EventDeckService.CreateSeed(DefaultRoomId);
             var session = CreateHostSession(map, seats, eventDeckSeed, configureContentRules);
             var dispatcher = new AuthoritativeCommandDispatcher(session);
@@ -202,7 +204,8 @@ namespace YC.Application.DevTools
                 state.Decks,
                 EventCardDatabase.GetCardIds(YC.Domain.Rules.EventColor.Green),
                 EventCardDatabase.GetCardIds(YC.Domain.Rules.EventColor.Yellow),
-                EventCardDatabase.GetCardIds(YC.Domain.Rules.EventColor.Red));
+                EventCardDatabase.GetCardIds(YC.Domain.Rules.EventColor.Red),
+                playerCount: seats.Count);
 
             var session = new GameSession(state);
             session.RegisterHandler(new SetupCommandHandler(
@@ -241,6 +244,18 @@ namespace YC.Application.DevTools
             if (state == null)
             {
                 return;
+            }
+
+            // 三人 P2 承担 I 级正式建设：预算独立于起点奖励，不直接植入设施或宣告。
+            if (state.Players.Count == 3)
+            {
+                var builder = state.FindPlayer(ResolveFormalSupplyBuildPlayerId(state));
+                var budget = FacilityCardDatabase.Get(FormalSupplyBlueFacilityId).GoldVoucherCost +
+                             FacilityCardDatabase.Get(FormalSupplyRedFacilityId).GoldVoucherCost;
+                if (builder != null && builder.Resources.GoldVoucher < budget)
+                {
+                    builder.Resources.GoldVoucher = budget;
+                }
             }
 
             var player = state.FindPlayer(LevelTwoFixturePlayerId);
@@ -312,6 +327,14 @@ namespace YC.Application.DevTools
                 return;
             }
 
+            if (state.Players.Count == 3)
+            {
+                var builder = state.FindPlayer(ResolveFormalSupplyBuildPlayerId(state));
+                result.SpecialActionFixtures.Add(
+                    "P" + builder.PlayerId + " goldVoucher=" + builder.Resources.GoldVoucher +
+                    " purpose=level-one-formal-supply-build");
+            }
+
             for (var fixtureIndex = 0; fixtureIndex < LevelTwoFixtureFacilityIds.Length; fixtureIndex++)
             {
                 for (var placementIndex = 0; placementIndex < state.Map.Facilities.Count; placementIndex++)
@@ -381,14 +404,15 @@ namespace YC.Application.DevTools
             GameState state,
             LocalhostAutoplayResult result)
         {
-            for (var i = 0; i < InitialLocations.Length; i++)
+            var initialLocations = state.Players.Count == 3 ? ThreePlayerInitialLocations : FourPlayerInitialLocations;
+            for (var i = 0; i < initialLocations.Length; i++)
             {
                 var playerId = i + 1;
                 if (!SubmitCommand(dispatcher, CreateCommand(
                     "autoplay-place-" + playerId,
                     GameCommandKind.ChooseInitialLocation,
                     playerId,
-                    InitialLocations[i]), result))
+                    initialLocations[i]), result))
                 {
                     return false;
                 }
@@ -902,7 +926,7 @@ namespace YC.Application.DevTools
                 return false;
             }
 
-            var optionQuery = CreateAutoplaySpecialActionOptionQuery();
+            var optionQuery = CreateAutoplaySpecialActionOptionQuery(state);
             switch (pending.Step)
             {
                 case SpecialActionPendingSteps.AwaitMilitaryTargets:
@@ -1119,19 +1143,25 @@ namespace YC.Application.DevTools
                 return true;
             }
 
-            if (result.ExploreLocationSuccesses < RequiredExploreSuccesses &&
+            // 先完成三人 I 级建设者的 0/1 槽，避免旅行支出抢占建设预算。
+            var prioritizeLevelOneBuild = state.Players.Count == 3 &&
+                player.PlayerId == ResolveFormalSupplyBuildPlayerId(state) &&
+                (!player.BuiltFacilityIds.Contains(FormalSupplyBlueFacilityId) ||
+                 !player.BuiltFacilityIds.Contains(FormalSupplyRedFacilityId));
+
+            if (!prioritizeLevelOneBuild && result.ExploreLocationSuccesses < RequiredExploreSuccesses &&
                 TrySubmitAutoplayExplore(dispatcher, state, player, result))
             {
                 return true;
             }
 
-            if (result.MoveCitySuccesses < RequiredMoveCitySuccesses &&
+            if (!prioritizeLevelOneBuild && result.MoveCitySuccesses < RequiredMoveCitySuccesses &&
                 TrySubmitAutoplayMoveCity(dispatcher, state, player, result))
             {
                 return true;
             }
 
-            if (result.DispatchInfluenceSuccesses < RequiredDispatchInfluenceSuccesses &&
+            if (!prioritizeLevelOneBuild && result.DispatchInfluenceSuccesses < RequiredDispatchInfluenceSuccesses &&
                 TrySubmitAutoplayDispatchInfluence(dispatcher, state, player, result))
             {
                 return true;
@@ -1168,7 +1198,7 @@ namespace YC.Application.DevTools
             if (player.BuiltFacilityIds.Count > beforeBuiltCount)
             {
                 result.BuildFacilitySuccesses++;
-                if (IsFormalSupplyEvidenceFacility(player.PlayerId, facilityId))
+                if (IsFormalSupplyEvidenceFacility(state, player.PlayerId, facilityId))
                 {
                     result.FormalSupplyBuilds.Add(
                         "P" + player.PlayerId + " facility=" + facilityId + " slot=" + slotIndex);
@@ -1184,7 +1214,7 @@ namespace YC.Application.DevTools
             PlayerState player,
             LocalhostAutoplayResult result)
         {
-            var cityStyleId = ResolveAutoplayCityStyleId(player.PlayerId);
+            var cityStyleId = ResolveAutoplayCityStyleId(state, player.PlayerId);
             if (string.IsNullOrEmpty(cityStyleId) ||
                 player.DeclaredCityStyles.Exists(declaration =>
                     declaration != null && declaration.CityStyleId == cityStyleId))
@@ -1247,7 +1277,7 @@ namespace YC.Application.DevTools
             PlayerState player,
             LocalhostAutoplayResult result)
         {
-            var specialActionId = ResolveAutoplaySpecialActionId(player.PlayerId);
+            var specialActionId = ResolveAutoplaySpecialActionId(state, player.PlayerId);
             if (string.IsNullOrEmpty(specialActionId) ||
                 HasCompletedSpecialAction(result, specialActionId))
             {
@@ -1270,7 +1300,7 @@ namespace YC.Application.DevTools
                 return false;
             }
 
-            var option = CreateAutoplaySpecialActionOptionQuery()
+            var option = CreateAutoplaySpecialActionOptionQuery(state)
                 .Query(state, player.PlayerId)
                 .Find(specialActionId, declaration.InfluenceMarkerId);
             if (option == null || !option.CanUse)
@@ -1331,9 +1361,9 @@ namespace YC.Application.DevTools
             return true;
         }
 
-        private static SpecialActionOptionQueryService CreateAutoplaySpecialActionOptionQuery()
+        private static SpecialActionOptionQueryService CreateAutoplaySpecialActionOptionQuery(GameState state)
         {
-            var mapQuery = new MapQueryService(StaticMapDefinitions.CreateFourPlayerMap());
+            var mapQuery = new MapQueryService(StaticMapDefinitions.Resolve(state.MapId));
             var influenceService = new InfluenceService(mapQuery);
             var movementService = new CityMovementService(
                 mapQuery,
@@ -1417,9 +1447,14 @@ namespace YC.Application.DevTools
                    result.SpecialActionSuccesses >= 1;
         }
 
-        private static string ResolveAutoplayCityStyleId(int playerId)
+        private static int ResolveFormalSupplyBuildPlayerId(GameState state)
         {
-            if (playerId == FormalSupplyBuildPlayerId)
+            return state.Players.Count == 3 ? 2 : 4;
+        }
+
+        private static string ResolveAutoplayCityStyleId(GameState state, int playerId)
+        {
+            if (playerId == ResolveFormalSupplyBuildPlayerId(state))
             {
                 return LevelOneAutoplayCityStyleId;
             }
@@ -1427,9 +1462,9 @@ namespace YC.Application.DevTools
             return playerId == LevelTwoFixturePlayerId ? LevelTwoAutoplayCityStyleId : string.Empty;
         }
 
-        private static string ResolveAutoplaySpecialActionId(int playerId)
+        private static string ResolveAutoplaySpecialActionId(GameState state, int playerId)
         {
-            if (playerId == FormalSupplyBuildPlayerId)
+            if (playerId == ResolveFormalSupplyBuildPlayerId(state))
             {
                 return LevelOneAutoplaySpecialActionId;
             }
@@ -1439,7 +1474,7 @@ namespace YC.Application.DevTools
 
         private static int ResolveAutoplayFacilitySlot(GameState state, PlayerState player, string facilityId)
         {
-            if (player.PlayerId == FormalSupplyBuildPlayerId)
+            if (player.PlayerId == ResolveFormalSupplyBuildPlayerId(state))
             {
                 if (facilityId == FormalSupplyBlueFacilityId)
                 {
@@ -1461,7 +1496,7 @@ namespace YC.Application.DevTools
             PlayerState player,
             LocalhostAutoplayResult result)
         {
-            var map = StaticMapDefinitions.CreateFourPlayerMap();
+            var map = StaticMapDefinitions.Resolve(state.MapId);
             var mapQuery = new MapQueryService(map);
             var explorationService = new ExplorationService(
                 mapQuery,
@@ -1602,7 +1637,7 @@ namespace YC.Application.DevTools
             PlayerState player,
             LocalhostAutoplayResult result)
         {
-            var map = StaticMapDefinitions.CreateFourPlayerMap();
+            var map = StaticMapDefinitions.Resolve(state.MapId);
             var mapQuery = new MapQueryService(map);
             var movementService = new CityMovementService(
                 mapQuery,
@@ -1708,7 +1743,7 @@ namespace YC.Application.DevTools
             PlayerState player,
             LocalhostAutoplayResult result)
         {
-            var map = StaticMapDefinitions.CreateFourPlayerMap();
+            var map = StaticMapDefinitions.Resolve(state.MapId);
             var mapQuery = new MapQueryService(map);
             var influenceService = new InfluenceService(mapQuery);
 
@@ -1795,7 +1830,7 @@ namespace YC.Application.DevTools
                 return false;
             }
 
-            var map = StaticMapDefinitions.CreateFourPlayerMap();
+            var map = StaticMapDefinitions.Resolve(state.MapId);
             var mapQuery = new MapQueryService(map);
             var pathSearch = new MapPathSearchService(mapQuery);
 
@@ -1872,7 +1907,7 @@ namespace YC.Application.DevTools
 
         private static string FindDeployableInfluenceSlot(GameState state, PlayerState player)
         {
-            var influenceService = new InfluenceService(new MapQueryService(StaticMapDefinitions.CreateFourPlayerMap()));
+            var influenceService = new InfluenceService(new MapQueryService(StaticMapDefinitions.Resolve(state.MapId)));
             for (var tokenIndex = 0; tokenIndex < state.Map.ResourceTokens.Count; tokenIndex++)
             {
                 var locationId = state.Map.ResourceTokens[tokenIndex].LocationId;
@@ -1892,7 +1927,7 @@ namespace YC.Application.DevTools
 
         private static string FindAffordableFacility(GameState state, PlayerState player)
         {
-            if (player.PlayerId == FormalSupplyBuildPlayerId)
+            if (player.PlayerId == ResolveFormalSupplyBuildPlayerId(state))
             {
                 if (!player.BuiltFacilityIds.Contains(FormalSupplyBlueFacilityId) &&
                     CanBuildSuppliedFacility(state, player, FormalSupplyBlueFacilityId))
@@ -1904,6 +1939,14 @@ namespace YC.Application.DevTools
                     CanBuildSuppliedFacility(state, player, FormalSupplyRedFacilityId))
                 {
                     return FormalSupplyRedFacilityId;
+                }
+
+                // 预算或供给异常时等待，不用无关设施填掉 I 级图案的预留槽。
+                if (state.Players.Count == 3 &&
+                    (!player.BuiltFacilityIds.Contains(FormalSupplyBlueFacilityId) ||
+                     !player.BuiltFacilityIds.Contains(FormalSupplyRedFacilityId)))
+                {
+                    return string.Empty;
                 }
             }
 
@@ -1941,9 +1984,9 @@ namespace YC.Application.DevTools
                    !string.IsNullOrEmpty(ResolveFacilityPaymentMode(player, facilityId));
         }
 
-        private static bool IsFormalSupplyEvidenceFacility(int playerId, string facilityId)
+        private static bool IsFormalSupplyEvidenceFacility(GameState state, int playerId, string facilityId)
         {
-            return playerId == FormalSupplyBuildPlayerId &&
+            return playerId == ResolveFormalSupplyBuildPlayerId(state) &&
                    (facilityId == FormalSupplyBlueFacilityId || facilityId == FormalSupplyRedFacilityId);
         }
 
@@ -2099,7 +2142,7 @@ namespace YC.Application.DevTools
             PlayerState player,
             bool requireOpponentRecipient)
         {
-            var map = StaticMapDefinitions.CreateFourPlayerMap();
+            var map = StaticMapDefinitions.Resolve(state.MapId);
             var mapQuery = new MapQueryService(map);
             var pathSearch = new MapPathSearchService(mapQuery);
             var collectionService = new ResourceCollectionService(mapQuery);
@@ -2398,15 +2441,19 @@ namespace YC.Application.DevTools
             }
         }
 
-        private static List<PlayerSeat> CreateJoinedSeats()
+        private static List<PlayerSeat> CreateJoinedSeats(int playerCount)
         {
-            return new List<PlayerSeat>
+            var seats = new List<PlayerSeat>
             {
                 CreateSeat(1, PlayerColor.Blue),
                 CreateSeat(2, PlayerColor.Red),
-                CreateSeat(3, PlayerColor.Green),
-                CreateSeat(4, PlayerColor.Yellow)
+                CreateSeat(3, PlayerColor.Green)
             };
+            if (playerCount == 4)
+            {
+                seats.Add(CreateSeat(4, PlayerColor.Yellow));
+            }
+            return seats;
         }
 
         private static PlayerSeat CreateSeat(int playerId, PlayerColor color)
@@ -2427,6 +2474,9 @@ namespace YC.Application.DevTools
             var builder = new StringBuilder();
             builder.AppendLine("本地联机自动跑局快照");
             builder.AppendLine("RoomId: " + result.RoomId);
+            builder.AppendLine("MapId: " + state.MapId);
+            builder.AppendLine("PlayerCount: " + state.Players.Count);
+            builder.AppendLine("EvidenceScope: 进程内权威命令跑局；含设施/资金夹具与供给排序，不代替正常入口或多实例验收。");
             builder.AppendLine("Success: " + result.Succeeded);
             if (!string.IsNullOrEmpty(result.FailureReason))
             {
@@ -2828,7 +2878,7 @@ namespace YC.Application.DevTools
 
         private static EventCardDefinition PeekEventCard(GameState state, string locationId)
         {
-            var eventColor = StaticMapDefinitions.GetEventColor(locationId);
+            var eventColor = StaticMapDefinitions.GetEventColor(state.MapId, locationId);
             var eventDeckService = new EventDeckService();
             if (eventDeckService.RemainingCount(state.Decks, eventColor) <= 0)
             {

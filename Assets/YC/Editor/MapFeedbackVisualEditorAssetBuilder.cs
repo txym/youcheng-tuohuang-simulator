@@ -79,20 +79,8 @@ namespace YC.Editor
         public static void RebuildAssetFilesMenu()
         {
             RebuildAssetFiles();
-            MapFeedbackVisualBuildReadiness.ValidateGeneratedAssets();
             Debug.Log(
-                "[MapFeedbackVisualEditorAssetBuilder] 已重建 Material、SpriteAtlas、AnimationClip 与 AnimatorController；" +
-                "尚未改写 MapView Prefab。完成 Prefab 接线后请运行完整 readiness。");
-        }
-
-        [MenuItem("YC/Build/Map Feedback Visuals/Rebuild Assets And Configure Map View")]
-        public static void RebuildAssetsAndConfigureMapViewMenu()
-        {
-            YC.EditorTools.MapViewEditorAssetBuilder.Rebuild();
-            MapFeedbackVisualBuildReadiness.ValidateReadyForBuild();
-            Debug.Log(
-                "[MapFeedbackVisualEditorAssetBuilder] 已重建视觉资产，接线 99 Animator/297 renderer，" +
-                "并通过地图与空间布局完整门禁。");
+                "[MapFeedbackVisualEditorAssetBuilder] 已重建 Material、SpriteAtlas、AnimationClip 与 AnimatorController；不会改写 MapView Prefab。");
         }
 
         public static MapFeedbackVisualAssetSet RebuildAssetFiles()

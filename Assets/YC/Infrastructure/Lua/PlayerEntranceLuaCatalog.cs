@@ -8,7 +8,7 @@ namespace YC.Infrastructure.Lua
 return function(ctx)
     local payload = ctx.payload
     local effects = {}
-    if payload.resourcePoint == 'B-01' then
+    if payload.resourcePoint == 'B-01' and not payload.initialEntranceRewardApplied then
         for _, resource in ipairs({ 'originium', 'originium_shard', 'iron' }) do
             table.insert(effects, Effect.GainResource({ recipient = payload.player, resourceType = resource, amount = 2 }))
         end

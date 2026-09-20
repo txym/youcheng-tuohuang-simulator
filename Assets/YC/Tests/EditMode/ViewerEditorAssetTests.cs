@@ -120,27 +120,36 @@ namespace YC.Tests.EditMode
             AssertNestedPrefabSource(actionLog.gameObject, ViewerPrefabTestUtility.ActionLogPrefabPath);
         }
 
-        [TestCase(ViewerPrefabTestUtility.ZoomablePrefabPath)]
-        [TestCase(ViewerPrefabTestUtility.RulebookPrefabPath)]
-        [TestCase(ViewerPrefabTestUtility.ActionLogPrefabPath)]
-        public void ViewerPrefab_HasNoMissingScripts(string path)
+        [Test]
+        public void ViewerPrefab_HasNoMissingScripts()
         {
-            var contents = PrefabUtility.LoadPrefabContents(path);
-            try
-            {
-                var transforms = contents.GetComponentsInChildren<Transform>(true);
-                for (var i = 0; i < transforms.Length; i++)
+            EditModeTestCaseRunner.Run(
+                new[]
                 {
-                    Assert.That(
-                        GameObjectUtility.GetMonoBehavioursWithMissingScriptCount(transforms[i].gameObject),
-                        Is.Zero,
-                        transforms[i].GetHierarchyPath());
-                }
-            }
-            finally
-            {
-                PrefabUtility.UnloadPrefabContents(contents);
-            }
+                    ViewerPrefabTestUtility.ZoomablePrefabPath,
+                    ViewerPrefabTestUtility.RulebookPrefabPath,
+                    ViewerPrefabTestUtility.ActionLogPrefabPath
+                },
+                path =>
+                {
+                    var contents = PrefabUtility.LoadPrefabContents(path);
+                    try
+                    {
+                        var transforms = contents.GetComponentsInChildren<Transform>(true);
+                        for (var i = 0; i < transforms.Length; i++)
+                        {
+                            Assert.That(
+                                GameObjectUtility.GetMonoBehavioursWithMissingScriptCount(transforms[i].gameObject),
+                                Is.Zero,
+                                path + ": " + transforms[i].GetHierarchyPath());
+                        }
+                    }
+                    finally
+                    {
+                        PrefabUtility.UnloadPrefabContents(contents);
+                    }
+                },
+                path => path);
         }
 
         [Test]

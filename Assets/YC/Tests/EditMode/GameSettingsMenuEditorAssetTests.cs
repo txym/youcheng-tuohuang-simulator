@@ -152,55 +152,79 @@ namespace YC.Tests.EditMode
             }
         }
 
-        [TestCase(StartScenePath, false, false)]
-        [TestCase(GameScenePath, true, true)]
-        public void Scene_ContainsConnectedSettingsPrefabWithExpectedOverrides(
-            string scenePath,
-            bool expectedReturnButton,
-            bool expectsCityBinding)
+        [Test]
+        public void Scene_ContainsConnectedSettingsPrefabWithExpectedOverrides()
         {
-            var existing = SceneManager.GetSceneByPath(scenePath);
-            var openedForTest = !existing.IsValid() || !existing.isLoaded;
-            var scene = openedForTest
-                ? EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive)
-                : existing;
-
-            try
-            {
-                var root = FindRoot(scene, "Game Settings Menu");
-                Assert.That(root, Is.Not.Null, scenePath);
-                Assert.That(PrefabUtility.IsPartOfPrefabInstance(root), Is.True, scenePath);
-                var source = PrefabUtility.GetCorrespondingObjectFromSource(root);
-                Assert.That(source, Is.Not.Null, scenePath);
-                Assert.That(AssetDatabase.GetAssetPath(source), Is.EqualTo(PrefabPath), scenePath);
-
-                var controllerType = GetRuntimeType("YC.Presentation.GameSettingsMenuController");
-                var controller = root.GetComponent(controllerType);
-                Assert.That(controller, Is.Not.Null, scenePath);
-                var controllerData = new SerializedObject(controller);
-                Assert.That(
-                    controllerData.FindProperty("showReturnToStartButton").boolValue,
-                    Is.EqualTo(expectedReturnButton),
-                    scenePath);
-
-                var city = controllerData.FindProperty("cityInteractionController").objectReferenceValue;
-                if (!expectsCityBinding)
+            EditModeTestCaseRunner.Run(
+                new[]
                 {
-                    Assert.That(city, Is.Null, scenePath);
-                    return;
-                }
-
-                Assert.That(city, Is.Not.Null, scenePath);
-                var cityData = new SerializedObject(city);
-                Assert.That(cityData.FindProperty("settingsMenu").objectReferenceValue, Is.SameAs(controller));
-            }
-            finally
-            {
-                if (openedForTest)
+                    new SceneSettingsCase
+                    {
+                        ScenePath = StartScenePath,
+                        ExpectedReturnButton = false,
+                        ExpectsCityBinding = false
+                    },
+                    new SceneSettingsCase
+                    {
+                        ScenePath = GameScenePath,
+                        ExpectedReturnButton = true,
+                        ExpectsCityBinding = true
+                    }
+                },
+                testCase =>
                 {
-                    EditorSceneManager.CloseScene(scene, true);
-                }
-            }
+                    var scenePath = testCase.ScenePath;
+                    var existing = SceneManager.GetSceneByPath(scenePath);
+                    var openedForTest = !existing.IsValid() || !existing.isLoaded;
+                    var scene = openedForTest
+                        ? EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive)
+                        : existing;
+
+                    try
+                    {
+                        var root = FindRoot(scene, "Game Settings Menu");
+                        Assert.That(root, Is.Not.Null, scenePath);
+                        Assert.That(PrefabUtility.IsPartOfPrefabInstance(root), Is.True, scenePath);
+                        var source = PrefabUtility.GetCorrespondingObjectFromSource(root);
+                        Assert.That(source, Is.Not.Null, scenePath);
+                        Assert.That(AssetDatabase.GetAssetPath(source), Is.EqualTo(PrefabPath), scenePath);
+
+                        var controllerType = GetRuntimeType("YC.Presentation.GameSettingsMenuController");
+                        var controller = root.GetComponent(controllerType);
+                        Assert.That(controller, Is.Not.Null, scenePath);
+                        var controllerData = new SerializedObject(controller);
+                        Assert.That(
+                            controllerData.FindProperty("showReturnToStartButton").boolValue,
+                            Is.EqualTo(testCase.ExpectedReturnButton),
+                            scenePath);
+
+                        var city = controllerData.FindProperty("cityInteractionController").objectReferenceValue;
+                        if (!testCase.ExpectsCityBinding)
+                        {
+                            Assert.That(city, Is.Null, scenePath);
+                            return;
+                        }
+
+                        Assert.That(city, Is.Not.Null, scenePath);
+                        var cityData = new SerializedObject(city);
+                        Assert.That(cityData.FindProperty("settingsMenu").objectReferenceValue, Is.SameAs(controller));
+                    }
+                    finally
+                    {
+                        if (openedForTest)
+                        {
+                            EditorSceneManager.CloseScene(scene, true);
+                        }
+                    }
+                },
+                testCase => testCase.ScenePath);
+        }
+
+        private sealed class SceneSettingsCase
+        {
+            public string ScenePath;
+            public bool ExpectedReturnButton;
+            public bool ExpectsCityBinding;
         }
 
         [Test]

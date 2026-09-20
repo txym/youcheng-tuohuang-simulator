@@ -158,7 +158,7 @@ namespace YC.Presentation
                     continue;
                 }
 
-                var result = LocalhostAutoplayRunner.RunToRound8Settlement();
+                var result = LocalhostAutoplayRunner.RunToRound8Settlement(YC.Infrastructure.Lua.LuaContentCatalog.Register);
                 if (result.Succeeded)
                 {
                     Debug.Log(result.Snapshot);
@@ -329,6 +329,10 @@ namespace YC.Presentation
 
         private static string CreateLocalGameSeedSource()
         {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            var seed = GetCommandLineValue(Environment.GetCommandLineArgs(), "--yc-player-journey-seed=");
+            if (!string.IsNullOrEmpty(seed)) return LocalGameSeedSourcePrefix + seed;
+#endif
             return LocalGameSeedSourcePrefix + Guid.NewGuid().ToString("N");
         }
 
@@ -400,6 +404,8 @@ namespace YC.Presentation
         private void BindStaticUi()
         {
             BindButton(view.StartGameButton, ShowLocalMapSelectionPanel);
+            YC.PlayerJourney.PlayerAutomationId.Attach(view.StartGameButton.gameObject, "start.local_game");
+            YC.PlayerJourney.PlayerAutomationId.Attach(view.MapSelectionPanel.FourPlayerButton.gameObject, "start.four_player_map");
             BindButton(view.OnlineModeButton, ShowOnlineModePanel);
             BindButton(view.AchievementsButton, ShowAchievementsPanel);
             BindButton(view.QuitGameButton, QuitGame);

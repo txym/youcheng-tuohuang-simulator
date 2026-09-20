@@ -5,6 +5,8 @@
 > 状态：已形成 Lua 运行时 API 分类、C# 内核处理和现有卡面系统迁移边界初稿；单项参数与复杂 Event 仍待按优先级确认，不代表当前代码已经实现。
 >
 > 架构边界参见[《Lua 效果树与回合主链设计》](Lua效果树与回合主链设计.md)。本文用于逐项补全其中第三节的三类可调用内容，补充结算与表现需求，并继续记录接口、C# 内核处理、UI 阻塞点和必须实现的 `RuleEvent`。
+>
+> [《命令与效果系统准备规范》](命令与效果系统准备规范.md)已经废弃，仅保留为历史讨论记录。发生冲突时始终以本文和《Lua 效果树与回合主链设计》为准。
 
 ## 0. 文档使用与共通理解
 
@@ -15,7 +17,7 @@
 3. 在第 3 节先确定 Lua 运行时 API 分类、共同引用和调用边界，再从第 1 节逐项填写 Effect 参数。
 4. 在第 4 节确定查询门面、Effect 编译、执行流水线和现有实现的迁移边界；单项 C# 处理合同与 Lua 接口一起填写在第 3.8 节。
 5. 在第 5 节标明 UI 交互和阻塞关系。
-6. 在第 6 节登记该 API 需要产生或监听的 Event；只有复杂 Event 才展开填写第 6.4 节模板。
+6. 在第 6 节登记该 API 需要产生或监听的 Event；只有复杂 Event 才展开填写第 6.5 节模板。
 7. 最后在第 7 节汇总第一阶段必须实现的 Event。
 
 未确定的内容直接填写“待定”，不要为了补齐表格提前假设规则。
@@ -24,13 +26,14 @@
 
 以下是 Agent 与 txym 对当前规则的理解，后续设计接口时继续核对：
 
-1. 游戏规则中的 Effect 不并行执行。同一父节点下已经确定顺序的子 Effect 依次进入执行和结算；前一个兄弟节点完成后，下一个兄弟节点才能执行。
-2. 一个 Effect 完成本身工作后，要么进入成功完成态，要么进入规则失败态，要么创建子节点并等待尚未结束的阻塞型子节点。成功和规则失败都是终态；只要子节点已经进入任一终态，就不再阻塞父节点。
-3. “玩家可以选择先后顺序”不称为并发执行，而称为“无序候选集合”。玩家作出选择后，被选中的候选转化为当前有序执行节点。
-4. 玩家行动窗口中的主要行动和快速行动可以作为无序候选挂在对应主链节点下，但玩家每次只选择并执行一个。
-5. `指令姐`的“战术行动”可能同时出现在特殊行动入口和快速行动入口中；两个入口必须复用同一个挂在玩家身上的“是否已使用”状态。卡牌正式名称和具体入口仍待牌面核对。
-6. 收尾阶段仍按本回合玩家顺序推进。某个玩家的原始收尾 Effect 直接挂在该玩家的收尾窗口节点下；同一玩家有多个收尾 Effect 时，它们先作为无序候选，由该玩家决定执行顺序。
-7. 多名玩家可任意顺序提交的规则任务使用“开放玩家任务组”。它可以同时展示多个玩家待办，但 Host 仍逐条提交状态；它不改变第 1 条所述的单条规则结算顺序。
+1. 游戏规则中的 Effect 不并行执行。同一父节点下已经确定顺序的子 Effect 依次进入执行和结算；前一个兄弟节点进入 `Completed` 或 `Failed` 后，下一个兄弟节点才能执行。
+2. 一个 Effect 在 `Running` 中完成当前主体步骤；没有后续等待时可直接得到结果，有未结束交互、Event 响应、子节点或额外 Blocker 时进入 `Blocked`。父执行器可在 Blocker 解除后继续创建下一步并保持 `Blocked`，最终得到 `pendingOutcome = completed / failed`；没有未结束 Blocker 后进入对应终态。`Blocked` 同时承担一般等待和完成响应窗口，不另设 `Completing`。
+3. 子节点 `Failed` 只解除阻塞，不自动把失败传播给父节点。父执行器根据自身合同读取子节点结果；普通 Effect式继续后续兄弟，条件式和固有效果链可以显式跳过分支或改变自己的结果。
+4. “玩家可以选择先后顺序”不称为并发执行，而称为“无序候选集合”。玩家作出选择后，被选中的候选转化为当前有序执行节点。
+5. 玩家行动窗口中的主要行动和快速行动可以作为无序候选挂在对应主链节点下，但玩家每次只选择并执行一个。
+6. `指令姐`的“战术行动”可能同时出现在特殊行动入口和快速行动入口中；两个入口必须复用同一个挂在玩家身上的“是否已使用”状态。卡牌正式名称和具体入口仍待牌面核对。
+7. 收尾阶段仍按本回合玩家顺序推进。某个玩家的原始收尾 Effect 直接挂在该玩家的收尾窗口节点下；同一玩家有多个收尾 Effect 时，它们先作为无序候选，由该玩家决定执行顺序。
+8. 多名玩家可任意顺序提交的规则任务使用“开放玩家任务组”。它可以同时展示多个玩家待办，但 Host 仍逐条提交状态；它不改变第 1 条所述的单条规则结算顺序。
 
 ### 0.3 永续内容与可选行动池
 
@@ -74,7 +77,7 @@ UI 操作本身不能绕过 C# 直接调用 Lua。哪些 Event 属于高频通�
 
 | 编号 | 中文名称 | 一句话规则语义 | 边界或特别说明 | 初步归类 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| 01 | 条件式 | 左侧 Effect式被玩家接受并完整执行后，才执行右侧 Effect式 | 可以允许指定玩家在左侧开始前放弃；放弃时左右两侧都不执行 | 卡面最小 Effect | 初步确认 |
+| 01 | 条件式 | 条件式节点先执行左侧阶段；左侧全部成功后才创建并执行右侧子节点 | 可以允许指定玩家在左侧开始前放弃；放弃时条件式节点自身失败且左右两侧都不创建；左侧子节点失败不向上传播，但会使条件不成立并跳过剩余左侧和全部右侧 | 卡面最小 Effect | 已确认 |
 | 02 | 选择式 | 从若干由 Effect式组成的选项中选择并执行 | 可设置总共最多执行次数，默认 `1`；可设置每项至多执行次数 | 卡面最小 Effect | 分类已确认 |
 | 03 | 次数式 | 允许玩家执行内部 Effect式任意次数 | 必须定义玩家如何结束，以及最大安全次数和无进展保护 | 卡面最小 Effect | 分类已确认 |
 | 04 | 掷骰 | 由 Host 按 `nDn` 生成并记录骰点 | 骰点可对应后续 Effect，也可以进入选择式；是否属于本 API 待确认 | 随机最小 Effect 候选 | 待确认 |
@@ -89,7 +92,7 @@ UI 操作本身不能绕过 C# 直接调用 Lua。哪些 Event 属于高频通�
 | 13 | 放置影响力 | 将玩家影响力放入指定合法位置 | 具体来源和目标位置待补充 | 最小 Effect 候选 | 待确认 |
 | 14 | 移除影响力 | 将指定位置的影响力移出并按规则处理 | 归还供应或其他去向待参数化 | 最小 Effect 候选 | 待确认 |
 | 15 | 移动影响力 | 将自己的影响力从一个合法位置移动到另一个合法位置 | 是否作为受保护组合待确认 | 效果链候选 | 待确认 |
-| 16 | 替换影响力 | 移除目标影响力，并在原位置放置新的影响力 | 执行时显式调用“移除影响力”和固定位置“放置影响力”，因此会形成对应语义 Event；外层仍可形成 `InfluenceReplaced` | 固有效果链候选 | 已确认 |
+| 16 | 替换影响力 | 移除目标影响力，并在原位置放置新的影响力 | 执行时显式调用“移除影响力”和固定位置“放置影响力”；一次成功替换依次形成 `InfluenceRemoved`、`InfluencePlaced`、`InfluenceReplaced` 三类 Event | 固有效果链候选 | 已确认 |
 | 17 | 放置公路 | 在指定航道放置公路指示物 | 清除原影响力是否由上层效果链组织待确认 | 最小 Effect 候选 | 待确认 |
 | 18 | 操作玩家标记 | 将玩家标记放到指定卡牌或区域，或从中移除 | 包括角色牌、企业家牌；城市样式标记可能归入，企业合作标记可能不归入 | 最小 Effect 集合候选 | 待拆分 |
 | 19 | 获得或操作特殊 Token | 获得、放置、移动、翻面或移除指定特殊 Token | 包括终身合作标记、赫默锁区、嘉维尔标记；可能需要按 Token 类型拆分 | 最小 Effect 集合候选 | 待拆分 |
@@ -133,7 +136,7 @@ Event 调用 Lua 处理函数
 
 Effect式本身没有独立的 `effectTypeId`，也不会额外生成一个“Effect式节点”。最外层 Effect式就是 Lua 处理函数返回的连续数组；数组中每项直接成为一个子 Effect 节点。条件式、选择式和次数式自身仍各生成一个节点，它们参数中的嵌套 Effect式只在对应分支或次数实际执行时再生成更深一层子节点。
 
-普通 Effect 被玩家主动放弃后进入 `Failed`，失败属于已结算的终态，不再阻塞父节点，Effect式继续处理下一个兄弟节点；条件式是明确例外，其左侧失败时不会创建右侧 Effect式。其他需要“前项失败则后项也不执行”的牌面组合，应使用条件式表达，而不是依赖普通数组的隐含行为。
+普通 Effect 被玩家主动放弃后得到 `pendingOutcome = failed`，完成响应窗口结束后进入 `Failed`；失败属于已结算的终态，不再阻塞父节点，Effect式继续处理下一个兄弟节点。条件式的父执行器是明确例外：它把左侧作为自己的条件阶段，左侧任一子节点失败时停止创建剩余左侧节点且不创建右侧节点，但条件式节点自身以 `Completed(condition_not_met)` 结束，不把子节点失败继续向上传播。其他需要“前项失败则后项也不执行”的牌面组合，应使用条件式表达，而不是依赖普通数组的隐含行为。
 
 #### 1.1.2 Lua 添加 Effect 的挂载位置
 
@@ -247,7 +250,7 @@ Effect 即将结算
 
 | 编号 | 中文名称 | 输入 | 主要阶段或节点 | 拆解成的 UI 和结算与表现 | 完成条件 | 状态 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 01 | 条件式 | 左侧 Effect式、右侧 Effect式、是否允许放弃、决定玩家 | 允许放弃时，在左侧交互区域提供放弃按钮；接受执行后调用左侧，只有左侧成功完成才调用右侧；放弃时左侧节点进入 `Failed(player_declined)`，右侧不创建 | 通用放弃按钮；左右 Effect式各自拆解 | 左侧成功后等待右侧完成；左侧失败时条件式结束且不再阻塞其父节点 | 已确认 |
+| 01 | 条件式 | 左侧 Effect式、右侧 Effect式、是否允许放弃、决定玩家 | 条件式整体是一个 `intrinsicFlow` 节点。允许放弃时先提供通用放弃按钮；接受后逐个创建左侧子节点，全部成功才创建右侧子节点。左侧任一子节点失败时停止左侧并跳过右侧；主动放弃则条件式节点自身进入 `Failed(player_declined)`，左右子节点都不创建 | 通用放弃按钮；已创建的左右 Effect 各自使用自己的交互与表现 | 左侧失败时条件式 `Completed(condition_not_met)`；左侧成功后等待右侧全部进入终态，再 `Completed(condition_met)`；右侧子节点失败不自动改变条件式终态 | 已确认 |
 | 02 | 选择式 | 选项（Effect式）、总执行次数、单项最多执行次数、是否允许少选或放弃 | 打开选择；记录各选项次数与执行顺序；按序调用每次选择对应的 Effect式 | 次数选择；由被调用的 Effect式各自拆解 | 合法选择产生的全部 Effect式完成；仅在输入允许时可少选或主动结束 | 初步填写 |
 | 03 | 次数式 | Effect式、最大执行次数、是否允许提前结束 | 选择执行次数；按所选次数逐次调用同一 Effect式 | 次数选择；由被调用的 Effect式各自拆解 | 所选次数对应的 Effect式全部完成，或在允许时由玩家主动结束 | 初步填写 |
 | 04 | 掷骰 | 骰子表达式 `nDn`、掷骰玩家、结果用途 | 由 Host 生成骰点；将各骰点和合计作为本节点结果供后续 Effect式使用 | 掷骰动画与结果展示，需在第 1.3 节补充表现项 | 骰点结果已经确定并写入本节点输出 | 初步填写 |
@@ -262,7 +265,7 @@ Effect 即将结算
 | 13 | 放置影响力 | 执行玩家、影响力实例或来源、影响力归属主体、候选范围上限或固定槽位、放置模式 | C# 构建槽位候选并发布 `CandidateSetBuilding`；选择或复验固定槽位；从指定来源取得一个影响力并放入合法空槽；记录其归属主体，归属主体允许为空 | 选择影响力槽位；放置或移除影响力 | 一个影响力已进入最终合法槽位并记录归属；无合法槽位或无可用影响力时按 `failurePolicy` 失败或跳过 | 初步填写 |
 | 14 | 移除影响力 | 执行玩家、影响力实例或归属筛选规则、候选范围上限、移除后的去向 | C# 构建影响力候选并发布 `CandidateSetBuilding`；选择或复验固定目标；从地图槽位移除并移至规则指定去向；成功后发布 `InfluenceRemoved` | 选择影响力槽位；放置或移除影响力 | 目标影响力已经离开原槽位、到达指定去向，`InfluenceRemoved` 已形成 | 初步填写 |
 | 15 | 移动影响力 | 执行玩家、可移动影响力或归属筛选规则、候选范围上限、固定起点或终点、移动模式 | 分别对来源和目标构建候选；以一个受保护语义操作改变同一影响力实例的槽位；完成后只发布 `InfluenceMoved`，不把内部离开与进入再作为独立移除/放置 Event | 选择影响力槽位；表现同一影响力从起点移动到终点 | 同一影响力实例已进入最终目标槽位，`InfluenceMoved` 已形成 | 初步填写 |
-| 16 | 替换影响力 | 执行玩家、被替换影响力或筛选规则、替换来源、替换影响力归属主体、放置失败策略 | 对被替换目标构建候选；保存原槽位；依次调用“移除影响力”和固定原槽位“放置影响力”，分别形成 `InfluenceRemoved`、`InfluencePlaced`；外层结束时形成 `InfluenceReplaced` | 选择影响力槽位；移除与放置表现由两个子 Effect 提供 | 按 `placementFailurePolicy` 完成整体替换或“只移除”结果；实际执行过的子 Effect Event 和外层 `InfluenceReplaced` 均已形成 | 已确认 |
+| 16 | 替换影响力 | 执行玩家、被替换影响力或筛选规则、替换来源、替换影响力归属主体 | 对被替换目标构建候选；保存原槽位；依次调用“移除影响力”和固定原槽位“放置影响力”。移除失败时外层失败且不创建放置；移除成功后即使放置失败，外层也按“只移除”完成 | 选择影响力槽位；移除与放置表现由两个子 Effect 提供 | 完整替换时依次形成三类 Event，外层 `Completed(replaced)`；只移除时只形成 `InfluenceRemoved`，放置子节点 `Failed`，外层仍 `Completed(removed_only)` | 已确认 |
 | 17 | 放置公路 | 可放置航道 | 选择航道；对该航道上的每个影响力调用“移除影响力”；随后提交公路状态并放置公路指示物 | 本链直接使用选择资源点或航道和放置公路表现；清除表现由“移除影响力”提供 | 全部“移除影响力”已完成，公路状态与公路指示物位置已经提交 | 初步填写 |
 | 18 | 操作玩家标记 | 标记所属玩家、来源区域、目标区域、数量、目标标记区或格位 | 选择目标卡牌或区域；将玩家标记放置、移除、移动或推进到指定格位 | 选择企业、选择玩家，其他卡牌标记区选择 UI 待补；玩家标记移动表现需在第 1.3 节补充 | 指定数量的玩家标记已按规则到达目标区域；不足部分按规则跳过 | 初步填写 |
 | 19 | 获得或操作特殊 Token | Token 类型或实例、所属者、操作类型、来源、目标、数量或目标面 | 按操作类型获得、放置、移动、翻面或移除 Token | 目标选择与 Token 状态表现均需按具体 Token 在第 1.2、1.3 节补充 | Token 的所属、位置、数量或正反面状态已经提交 | 初步填写 |
@@ -297,7 +300,7 @@ Effect 即将结算
 
 - 表中写“Effect式各自拆解”的部分，表示当前链只负责按规则添加并等待子 Effect，不重复展开卡面内部结构。
 - 固定目标已由上层传入时，跳过对应选择 UI；需要玩家决定目标、数量或顺序时，才创建相应 UI 交互。
-- 除条件式外，一个复合效果中的某一步无法执行时，按规则跳过该步并继续处理后续步骤；是否允许玩家主动放弃，必须由牌面或输入参数明确给出。
+- 子节点失败不会机械地改变父节点结果。普通 Effect式继续处理下一个兄弟；条件式按左侧阶段的失败结果跳过分支；其他复合链必须在单项合同中写出如何解释每个子节点结果。是否允许玩家主动放弃，必须由牌面或输入参数明确给出。
 - “主要行动：……”负责行动阶段门禁、行动预算和主要行动完成状态；不重复实现“放置影响力”“移动影响力”“建设”“移动城市”等可复用结算链。
 - 复合链调用其他固有效果链时，只负责准备输入、决定调用顺序并等待完成；被调用链负责自己的 UI、状态提交和表现。
 
@@ -522,12 +525,12 @@ Lua 定义示意：
 | 雷蛇 | `character.liskarm.strategy` | 连续放置 2 个己方影响力 | `current`；成功后登记一次 `playerCleanup`，收尾移除 1 个自己的影响力 | 两次放置均使用实时合法槽位；第二次排除第一处；收尾只列出仍存在的己方影响力 | 已核对 |
 | 雷蛇 | `character.liskarm.tactic` | 条件式支付 3 金券，替换 1 个影响力 | `current` | 对手影响力候选；若同地块有对手移动城市或己方供应不足，当前实现为只移除不放置 | 已核对 |
 | 极境 | `character.elysium.strategy` | 从源岩、源石、异铁中选择当前持有量并列最少的一种，获得 4 个 | `current` | 资源选项由当前资源数量生成；并列时均可选 | 已核对 |
-| 极境 | `character.elysium.tactic` | 条件式支付 3 源石，免费移动城市到相邻、已探索且已有自己影响力的资源点 | `current` | 移动目标使用专用移动模式，再经过 `CandidateSetBuilding` 接受卡面限制 | 已核对 |
+| 极境 | `character.elysium.tactic` | 条件式支付 3 源石，免费移动城市到相邻、已探索且已有自己影响力的资源点 | `current` | 普通完整移动，仅修改可选目标：相邻、已探索、有己方影响力；不是独立的突袭行为。目标在左侧支付完成后生成 | 已核对 |
 | 德克萨斯 | `character.texas.strategy` | 获得 12 金券；选择设施供应区 1 张设施牌放到牌堆底；原供应槽补牌 | `current` | 选择公开供应区设施牌；牌堆为空时当前实现会使原牌继续留在供应槽 | 已核对 |
-| 德克萨斯 | `character.texas.tactic` | 条件式支付 3 金券；移除 1 个影响力；再连续移动 2 个自己的影响力 | `current` | 每步根据前面选择后的投影状态重算候选；同一影响力不能重复移动 | 已核对 |
+| 德克萨斯 | `character.texas.tactic` | 条件式支付 3 金券；移除 1 个影响力；再连续移动 2 个自己的影响力 | `current` | 支付完成后才开始移除选择；每一步先提交实际状态，再重算下一步候选；按稳定 InfluenceId 排除已移动实例 | 已核对 |
 | 坎诺特 | `character.cannot.strategy` | 自由选择出售源岩、源石、异铁和至纯源石，按统一价格获得金券 | `current` | 数量选择允许全部为 0；当前价格为 3、3、4、15 金券 | 已核对 |
 | 坎诺特 | `character.cannot.tactic` | 选择源岩、源石或异铁；所有玩家失去该类全部资源，并各按每个 2 金券获得补偿；发动者获得 1 分 | `current` | 选择 1 种基础资源；按玩家顺序调用支付、获得资源和得分 Effect | 已核对 |
-| 锡人 | `character.tin_man.strategy` | 获得 1 分；条件式支付 12 金券，购买 1 个至纯源石；条件式支付 15 金券，购买 1 个至纯源石。 | `current` | 条件式条件可放弃。 | 已核对；购买 API 归类另行确认 |
+| 锡人 | `character.tin_man.strategy` | 获得 1 分；条件式支付 12 金券，购买 1 个至纯源石；条件式支付 15 金券，购买 1 个至纯源石。 | `current` | 两个条件式分别允许放弃；拒绝第一项仍继续第二项。 | 已核对；购买 API 归类另行确认 |
 | 锡人 | `character.tin_man.tactic` | 同时将自己弃牌区中的角色牌回到手牌。然后根据回收数量生成选择式，获得5金券或移动1个己方影响力。 | `current` | 正在结算的锡人尚未进入弃牌区。 | 已核对 |
 
 基础角色牌没有发现“盖放后立即生效”的已实现效果，但仍保留 `CharacterCardCovered`，供扩展角色牌、企业家能力或以后录入的卡牌订阅。未翻开的牌通过定向路由调用自己的 Lua 时，开放观察者只能获得遮蔽后的公共 payload。
@@ -540,10 +543,10 @@ Lua 定义示意：
 | --- | --- | --- | --- | --- | --- |
 | 军工化区域 | I 级，2 分 | 旋转参与设施、放置玩家标记、获得 2 分并解锁特殊行动 | 放置 `min(本方在该牌标记数, 3, 供应数量, 最终合法槽位数)` 个影响力 | `used → unused` | 规则与现有实现可确认 |
 | 动员配套体系 | I 级，3 分 | 旋转参与设施、放置玩家标记、获得 3 分并解锁特殊行动 | 替换 1 个对手影响力；不能放置时仍尽量完成移除 | `used → unused` | 规则与现有实现可确认 |
-| 复合动力系统 | I 级，3 分 | 旋转参与设施、放置玩家标记、获得 3 分并解锁特殊行动 | 支付 1 源石及合计 3 个源岩/异铁；免费完整移动城市 1 次；事件结算后尽量在经过航道放置 1 个影响力 | `used → unused` | 规则与现有实现可确认 |
+| 复合动力系统 | I 级，3 分 | 旋转参与设施、放置玩家标记、获得 3 分并解锁特殊行动 | 条件式支付 1 源石及合计 3 个源岩/异铁；免费完整移动城市 1 次；事件结算后尽量在经过航道放置 1 个影响力 | `used → unused` | 规则与现有实现可确认 |
 | 物资中继站 | I 级，2 分 | 除通用宣告步骤外，获得 1 源岩、1 源石、1 异铁 | 无特殊行动 | 无特殊行动标记复位 | 规则与现有实现可确认 |
-| 源石工业中枢 | II 级，6 分 | 旋转参与设施、放置玩家标记、获得 6 分；首次有效标记提供 2 次总使用次数 | 支付 6 金券，本玩家行动窗口增加至多 2 点主要行动预算；发动后锁定本窗口角色牌 | `used_from_2 → 1`，`used_from_1 → 0` | 规则与现有实现可确认 |
-| 高效移动管理体系 | II 级，7 分 | 旋转参与设施、放置玩家标记、获得 7 分；首次有效标记提供 2 次总使用次数 | 支付 3 源石，连续执行至多 2 次免费完整移动城市；发动后锁定本窗口角色牌 | `used_from_2 → 1`，`used_from_1 → 0` | 规则与现有实现可确认 |
+| 源石工业中枢 | II 级，6 分 | 旋转参与设施、放置玩家标记、获得 6 分；首次有效标记提供 2 次总使用次数 | 条件式支付 6 金券，本玩家行动窗口增加至多 2 点主要行动预算；发动后锁定本窗口角色牌 | `used_from_2 → 1`，`used_from_1 → 0` | 规则与现有实现可确认 |
+| 高效移动管理体系 | II 级，7 分 | 旋转参与设施、放置玩家标记、获得 7 分；首次有效标记提供 2 次总使用次数 | 条件式支付 3 源石，连续执行至多 2 次免费完整移动城市；发动后锁定本窗口角色牌 | `used_from_2 → 1`，`used_from_1 → 0` | 规则与现有实现可确认 |
 
 城市样式的通用宣告流程应调用 `Effect.DeclareCityStyle`；牌面 Lua 只填写即时奖励与特殊行动 Effect式。I/II 级标记复位统一写在各城市样式能力的 Lua `playerCleanup` 处理函数中，由处理函数返回 `Effect.OperatePlayerMarker`；C# 不再为具体城市样式生成重复的复位规则。
 
@@ -755,8 +758,9 @@ return {
 | `decisionPlayer` | `PlayerRef` | Effect 的执行玩家 | `allowDecline = true` 时有权点击放弃按钮的玩家 |
 | `declinePromptKey` | `string` | 通用提示 | UI 使用的本地化提示键，不改变规则语义 |
 | `unavailablePolicy` | 稳定枚举 | 由具体 Effect 定义 | 当前无法执行时采用哪种规则失败原因或“合法无变化”；它与玩家主动放弃不同 |
+| `completionHandlerId` | 稳定处理器 ID 或省略 | 省略 | 当前卡面能力预先声明的单次 continuation；在本 Effect 的 `EffectCompleted` 响应窗口定向调用，用于根据随机、抽牌或交互结果生成后续子 Effect |
 
-玩家点击放弃按钮后，UI 向 Host 提交 `DeclineEffect(effectId)`；Host 校验决定玩家和节点时点后，将节点记录为 `Failed`，并写入 `failureReason = player_declined`。`Failed` 是完成态，不再阻塞父节点；它不提交该 Effect 的规则状态，也不产生该 Effect 的成功语义 Event。通用 `EffectCompleted` 可以携带 `outcome = failed`。条件式的左侧失败时不创建右侧。
+玩家点击放弃按钮后，UI 向 Host 提交 `DeclineEffect(effectId)`；Host 校验决定玩家和节点时点后，将该 Effect 节点的 `pendingOutcome` 记录为 `failed`，并写入 `failureReason = player_declined`。它不提交该 Effect 的规则状态，也不产生该 Effect 的成功语义 Event；完成响应窗口结束后节点进入 `Failed`，不再阻塞父节点。通用 `EffectCompleted` 携带 `outcome = failed`。条件式在左侧子节点失败时不创建右侧，但条件式父节点自身按第 3.6 节规则进入 `Completed(condition_not_met)`。
 
 条件式、选择式和次数式同样是卡面最小 Effect，因此也各自拥有构造函数，而不是纯结构辅助函数：
 
@@ -767,6 +771,16 @@ return {
 | `Effect.Repeat(args)` | 一个次数式节点 | `body` 是一个 `EffectSpec[]` |
 
 这些嵌套列表在 Lua 返回时先完成结构校验，但不会立刻全部建立成运行节点。例如选择式只在玩家选定某个选项后，才把该选项的 Effect式建立为选择式节点的子节点。
+
+`Effect.Condition` 的节点本身同时承担条件控制器和左侧阶段所有者，不再为“条件式整体”额外套一层节点。其固定执行规则为：
+
+1. 若玩家在任何左侧子节点创建前主动放弃，条件式节点进入 `Failed(player_declined)`，左右两侧均不创建。
+2. 接受后按顺序逐个创建并等待 `leftEffects`。左侧子节点 `Completed` 才创建下一个；任一左侧子节点 `Failed` 时不再创建剩余左侧和全部右侧。
+3. 左侧失败不会向条件式上传播为 `Failed`；条件式记录 `conditionMet = false`、失败子节点 ID 与原因，并进入 `Completed(condition_not_met)`。
+4. 左侧全部 `Completed` 后，设置 `conditionMet = true`，再将 `rightEffects` 创建为条件式节点的有序子节点。
+5. 右侧按普通 Effect式执行；右侧子节点即使 `Failed` 也只解除阻塞并继续后续兄弟。全部右侧进入终态后，条件式进入 `Completed(condition_met)`，并在结果中保留右侧各子节点结局。
+
+因此条件式控制的是“是否创建后续分支”，不是通用异常传播机制。若某张牌要求右侧失败使整个条件式失败，必须使用另一个具有显式聚合策略的固有效果链，不能改变 `Effect.Condition` 的默认语义。
 
 第 1.4 节中的效果对应以下第一版构造函数。每个函数统一接收一个具名参数 table，返回一个 `EffectSpec`：
 
@@ -788,7 +802,7 @@ return {
 
 | Lua 构造函数 | 主要必填参数 | 重要可选参数或策略 | C# 执行种类 |
 | --- | --- | --- | --- |
-| `Effect.Condition` | `leftEffects[]`、`rightEffects[]` | 共同 `allowDecline`、`decisionPlayer`，以及 `failurePolicy` | `intrinsicFlow` |
+| `Effect.Condition` | `leftEffects[]`、`rightEffects[]` | 共同 `allowDecline`、`decisionPlayer` | `intrinsicFlow`；左侧首个失败停止分支但不向上传播 |
 | `Effect.Choice` | `player`、`options[]` | `minSelections`、`maxSelections`、`allowDecline`、`orderPolicy` | `intrinsicFlow` |
 | `Effect.Repeat` | `player`、`body[]`、`maxCount` | `minCount`、`allowEarlyStop` | `intrinsicFlow` |
 | `Effect.RollDice` | `roller`、`expression` | `resultPurpose` | `atomic`，结果由 Host 产生 |
@@ -802,7 +816,7 @@ return {
 | `Effect.PlaceInfluence` | `executingPlayer`、`influenceSource`、`ownerSubject` | `targetSlotId`、`candidateScope`、`placementMode`、`failurePolicy` | `atomic` 或带目标选择的 `intrinsicFlow` |
 | `Effect.RemoveInfluence` | `executingPlayer`、`targetInfluence` 或 `candidateScope` | `destination`、`reasonId`、`failurePolicy` | `atomic` 或带目标选择的 `intrinsicFlow` |
 | `Effect.MoveInfluence` | `executingPlayer`、`targetInfluence` 或来源范围 | `targetSlotId`、`candidateScope`、`movementMode` | 受保护 `intrinsicFlow`，整体产生 `InfluenceMoved` |
-| `Effect.ReplaceInfluence` | `executingPlayer`、`targetInfluence`、`replacementSource`、`replacementOwner` | `placementFailurePolicy` | `intrinsicFlow`，调用移除与固定位置放置并额外产生 `InfluenceReplaced` |
+| `Effect.ReplaceInfluence` | `executingPlayer`、`targetInfluence`、`replacementSource`、`replacementOwner` | 第一版 `placementFailurePolicy` 只允许或默认 `keep_removal` | `intrinsicFlow`；完整成功时产生三类 Event，只移除时外层仍完成 |
 | `Effect.PlaceRoad` | `executingPlayer`、`route` | `roadSource`、`removeInfluencePolicy` | `intrinsicFlow` |
 | `Effect.SetLocationsOpen` | `locationIds[]`、`isOpen` | `reasonId` | `atomic`；整组地块在同一提交边界更新 |
 | `Effect.OperatePlayerMarker` | `markerOwner`、`operation`、`destinationZone` | `sourceZone`、`count`、`targetSlot` | `atomic` 或带目标选择的 `intrinsicFlow` |
@@ -855,7 +869,26 @@ end
 
 例如上面的两个返回项会成为同一当前结算节点下的两个有序子节点，而不是先生成一个额外的 `Sequence` 节点。
 
-掷骰、抽牌、选择结果等运行时结果不能依赖 Lua 局部变量等待后续使用。对应 Effect 完成后由 C# 形成新的 `RuleEvent`，下一次 Lua 处理函数从 Event payload 读取结果并返回新一组子 Effect。
+掷骰、抽牌、选择结果等运行时结果不能依赖 Lua 局部变量等待后续使用。调用方需要根据结果继续时，在 EffectSpec 的共同字段中填写当前能力已经声明的 `completionHandlerId`。C# 编译节点时创建一次性 `ContinuationBinding`；当该节点进入 `EffectCompleted` 响应窗口时定向调用处理器，处理器从 Event payload 的 `normalizedResult` 读取结果，并返回新一组子 Effect。返回项挂在该来源 Effect 下并阻塞其最终终态。
+
+```lua
+function on_ability_activated(event)
+    return {
+        Effect.RollDice({
+            roller = event.playerId,
+            expression = "1D6",
+            completionHandlerId = "after_roll"
+        })
+    }
+end
+
+function after_roll(event)
+    local total = event.payload.normalizedResult.total
+    return build_effects_for_roll(total)
+end
+```
+
+`completionHandlerId` 只能引用同一内容定义和能力中预先注册的具名处理器，不能传 Lua 函数、闭包或任意全局函数名。一个 EffectSpec 第一版至多绑定一个 continuation；需要多个公开观察者时仍使用显式 `eventSubscriptions`。在同一个 `EffectCompleted` 中，来源节点自己的定向 continuation 先加入处理器序列，其后才是按稳定订阅顺序排列的显式观察者。
 
 玩家收尾和最终计分也不通过普通 Effect 构造函数填写任意目标 ID。它们由卡面能力定义中的固定处理区声明；C# 在对应时点形成 Event、调用处理函数，并把返回列表挂到当前收尾或计分节点。其他规则时机继续通过显式 `eventSubscriptions` 进入相同流程。
 
@@ -930,13 +963,13 @@ CandidateSetDraft
 | `influence_removal_target` | 符合归属筛选和范围的现有影响力 | 保护某来源或某区域的影响力不被移除 |
 | `facility_supply_card` | 当前公开设施供应区中的可用设施牌 | 卡面禁止或限定某颜色、费用、标签的设施牌 |
 
-如果多个补丁对同一个 ID 先移除后添加，按 Event 的稳定处理器顺序依次应用，后执行的补丁得到最终结果；任何补丁都不能突破 `candidatePoolIds`。稳定顺序由显式订阅优先级、内容实例 ID、能力 ID 和订阅 ID 组成，不能依赖 Lua 文件或模块加载顺序。
+如果多个补丁对同一个 ID 先移除后添加，按 Event 的稳定处理器顺序依次应用，后执行的补丁得到最终结果；任何补丁都不能突破 `candidatePoolIds`。稳定比较键固定为 `(routeTier, priority, contentInstanceId, abilityId, handlerId)`：定向主处理器或来源 Effect 的 continuation 使用 `routeTier = 0`，显式观察订阅使用 `routeTier = 1`；`priority` 为越小越先，默认 `0`；其余字符串使用 Ordinal 升序。需要玩家决定先后时不使用该比较键直接结算，而是建立有限效果轮。顺序不能依赖 Lua 文件或模块加载顺序。
 
 ### 3.8 单项 Effect 实现合同模板
 
 第 3.6 节只负责列出构造函数与参数骨架。某个 Effect 进入实现前，必须复制并填写本模板，把 Lua 调用合同、C# 内核处理、UI 阻塞、Event 和恢复语义一次写清。本模板已经合并原第 4.9 节的“单项内核处理模板”，同一个 Effect 不再维护两份重复说明。
 
-不要求第一轮把所有 Effect 全部展开。首批优先填写 `Effect.MoveCity`、`Effect.PlaceInfluence`、`Effect.RemoveInfluence`、`Effect.MoveInfluence`、`Effect.CoverCharacterCard`、`Effect.ResolveCharacterCardEffect`、`Effect.OpenPlayerTaskGroup` 和 `Effect.RevealEventCard`；其他 Effect 在进入实现或出现复杂牌面调用前补齐。
+不要求第一轮把所有 Effect 全部展开。首批优先填写 `Effect.Condition`、`Effect.SetLocationsOpen`、`Effect.MoveCity`、`Effect.PlaceInfluence`、`Effect.RemoveInfluence`、`Effect.MoveInfluence`、`Effect.ReplaceInfluence`、`Effect.CoverCharacterCard`、`Effect.ResolveCharacterCardEffect`、`Effect.OpenPlayerTaskGroup` 和 `Effect.RevealEventCard`；其他 Effect 在进入实现或出现复杂牌面调用前补齐。第 3.6、4.4 和 6.4 节已经冻结条件式、完成响应窗口和替换的共同行为，复制模板时不得改写这些语义。
 
 #### `[待填写稳定 ID]` 中文名称
 
@@ -1028,6 +1061,42 @@ C# 节点处理：
 | 调用的固有效果链 |  |  |
 | 监听的 Event |  |  |
 | 产生的 Event |  |  |
+
+#### 3.8.1 `effect.map.set_locations_open` 改变地块开放状态
+
+| 字段 | 内容 |
+| --- | --- |
+| Lua 构造函数 | `Effect.SetLocationsOpen` |
+| 类型 | 卡面最小 Effect |
+| 状态 | 已实现（NMC-008 首批纵向切片） |
+| 允许调用者 | 基础规则与具有地图状态修改权限的卡面能力 |
+| 一句话语义 | 在一个 Host 提交边界内把给定地块集合设置为目标开放状态 |
+| `effectTypeId` | `effect.map.set_locations_open` |
+| C# `executorKind` | `atomic` |
+| C# 执行器 | `SetLocationsOpenEffectExecutor` |
+
+输入与结果：
+
+| 字段 | Lua 类型 | C# 规范化类型 | 必填 | 规则 |
+| --- | --- | --- | --- | --- |
+| `locations` | 连续 `LocationRef[]` | Ordinal 排序并去重的 `string[] locationIds` | 是 | 每个 ID 必须属于本局地图且允许由调用来源改变开放状态；空集合合法 |
+| `isOpen` | `boolean` | `bool` | 是 | 所有目标使用同一状态 |
+| `reasonId` | 稳定字符串 | `string` | 否 | 省略时取 `rule.unspecified`，只用于规则来源和审计 |
+
+```text
+SetLocationsOpenResult
+├─ isOpen
+├─ changedLocationIds[]
+└─ unchangedLocationIds[]
+```
+
+- 执行前按最新状态复验整个集合；任一引用不存在、类型错误或调用来源无权限时，节点得到 `pendingOutcome = failed`，不修改任何地块。
+- 全部合法后在一个事务内更新所有需要改变的地块。已经处于目标状态的地块进入 `unchangedLocationIds`；全部未变化也是 `Completed(no_change)`。
+- `changedLocationIds` 非空时只形成一次 `LocationsOpenStateChanged`，payload 携带规范化后的完整目标集合、实际变化集合、`isOpen` 和 `reasonId`。该 Event 的响应结束后再进入通用 `EffectCompleted` 窗口。
+- 本 Effect 不创建 UI，不选择地块，也不隐式触发企业升级。回合 Lua 必须在构造 EffectSpec 前通过只读查询确定目标资源点集合；企业升级若以后加入，由 `RoundStarted` 返回的独立兄弟 Effect 表达。
+- 节点 ID、Event ID、状态变化、结果和分发收据与领域状态在同一 Host 事务提交。恢复时已有提交记录则不得再次写入或重新发布 Event。
+
+NMC-008 实现定位：`Assets/YC/Infrastructure/Lua/RoundStartedRedZoneRule.cs`（内容版本 `1.0.0`）负责 `RoundStarted` 的 Lua 选择；`Assets/YC/Domain/Effects/SetLocationsOpenEffectExecutor.cs`（定义版本 `1.0.0`）负责 C# 复验与提交。规范化参数序列化为 `locations: StableReference("location", id)[]`、`isOpen: bool`、`reasonId: string`，目标集合按 Ordinal 排序并去重；结果和 `LocationsOpenStateChanged` payload 使用本节列出的三个结果数组及完整目标集合。
 
 ## 4. C# 内核处理说明
 
@@ -1145,7 +1214,9 @@ C# 以仍处于结算中的节点创建 RuleEvent 调用上下文
   → 创建 UI 子节点、固有效果链子节点或后续 RuleEvent
 ```
 
-当前结算节点必须在 Lua 分发和子节点挂载完成前保持 `Running` 或等价的“正在收集响应”状态，不能先进入 `Completed` 再向已完成节点补挂子节点。若某个规则语义上的“完成后 Event”允许产生阻塞响应，C# 应先进入完成响应窗口，收集并执行返回的子 Effect，最后才把源节点标记为完成。
+当前结算节点不能先进入终态再补挂子节点。节点在 `Running` 中执行当前主体步骤；若需要等待交互、语义 Event 响应、默认阻塞子节点或额外 Blocker，则转入 `Blocked`。Blocker 解除后父执行器可以创建下一步并继续保持 `Blocked`，直到得到 `pendingOutcome = completed / failed`。此前阻塞全部解除后，执行器发布一次通用 `EffectCompleted`；有处理器时源节点进入或保持 `Blocked` 并收集其响应，没有处理器或返回空列表时可以在同一 Host 事务中直接进入终态。响应子节点全部进入 `Completed`/`Failed` 后，源节点进入 `pendingOutcome` 对应的终态。`Blocked` 同时承担一般等待和完成响应窗口，不增加 `Completing` 状态。
+
+子节点进入 `Failed` 只解除父节点对应的 Blocker，不修改父节点的 `pendingOutcome`。需要根据子节点失败改变流程的父执行器必须显式读取结果并记录决策，例如条件式跳过右侧、替换影响力把放置失败解释为 `Completed(removed_only)`。子节点进入 `Faulted` 不属于正常解除；第一版固定沿父关系把所属 Effect 根标为 `Faulted`，将运行状态置为 `paused_fault` 并停止主链推进，不能当作普通规则失败继续。
 
 同一个 Event 有多个订阅处理器时，C# 先按 Event 既定的处理器顺序调用；每个处理器返回列表的内部顺序保持不变。若规则要求玩家决定多个响应的先后顺序，Event 分发器应先创建无序候选或有限效果轮，不能依赖 Lua 模块加载顺序。
 
@@ -1176,7 +1247,7 @@ EffectRegistration
 - `atomic` 由 C# 在一个规则提交边界内完成，例如获得资源、获得分数、旋转设施牌。
 - `intrinsicFlow` 由 C# 创建固定子节点并等待，例如移动城市、建设、探索和采集。
 - 开放式 `intrinsicFlow` 为每名应答玩家创建独立子任务和一个完成屏障。它不把 Lua 数组的默认顺序解释为玩家执行顺序；多个命令可按到达顺序由 Host 串行提交，直到 `completionPolicy` 满足。采集和不要求玩家顺序的回合开始选择可复用这一结构。
-- 任意 Effect 的 `allowDecline = true` 都由 UI 在首次状态提交前提供通用放弃按钮。玩家点击后提交 `DeclineEffect`；Host 接受后记录 `Failed(player_declined)`，不调用具体执行器的提交步骤，也不形成成功语义 Event。失败已是终态，因此解除该节点对父节点的阻塞。
+- 任意 Effect 的 `allowDecline = true` 都由 UI 在首次状态提交前提供通用放弃按钮。玩家点击后提交 `DeclineEffect`；Host 接受后记录 `pendingOutcome = failed` 与 `failureReason = player_declined`，不调用具体执行器的提交步骤，也不形成成功语义 Event。完成响应窗口结束后节点进入 `Failed` 并解除对父节点的阻塞。
 - 固有效果链调用其他 Effect 时必须通过同一个 `EffectRegistry` 和树执行器创建子节点，不能直接调用另一个处理器的方法绕过记录。
 - 需要玩家输入时，执行器创建 `InteractionRequest` 子节点并阻塞所属 Effect；Lua 不直接调用 UI。
 - 子节点进入成功或失败终态后由树执行器重新判断父节点，不使用独立持久化调用栈。
@@ -1231,10 +1302,12 @@ TimingHandlerBinding
 
 ### 4.7 幂等、版本和动态结果
 
+- 节点、Event、交互、Binding 和分发收据的稳定 ID 统一由 `StableIdFactory.Create(kind, components[])` 生成。每个组件使用不受区域设置影响的字符串表示，以 UTF-8 字节长度前缀编码后计算完整 SHA-256，输出 `<kind>_<64位小写十六进制>`；禁止直接拼接、截断哈希或包含本地化/可变显示文本。
 - 子节点 ID 由 `eventId`、`subscriptionId`、返回数组下标和嵌套路径确定；同一次 Event 以相同处理器和相同返回顺序恢复时得到相同 ID。
 - C# 记录某个 `eventId + subscriptionId` 是否已经成功编译并挂载返回列表。已挂载时不得再次执行 Lua 生成第二份子树。
 - Effect 节点记录规范化后的参数、结果、调用内容版本和提交序号，不保存 Lua table、闭包或协程。
-- 随机数、抽牌、洗牌和玩家输入由 C# 记录实际结果。需要根据结果继续时，C# 发布新的 RuleEvent，并以原 Effect 节点作为 `sourceEffectId`。
+- 随机数、抽牌、洗牌和玩家输入由 C# 记录实际结果。需要根据结果继续时，C# 在来源节点的 `EffectCompleted` 响应窗口调用已持久化的 `ContinuationBinding`；绑定 ID 由 `sourceEffectId + completionHandlerId + definitionVersion` 经稳定 ID 工厂生成。
+- continuation 的调用收据和返回子节点必须同事务写入；恢复时已有收据则只继续现有子节点，没有收据才允许按保存的绑定重新调用对应版本处理器。多个相同类型 Effect 通过各自的 `sourceEffectId` 区分，不能靠静态订阅猜测要继续哪一次结果。
 - Lua 定义版本与本局 `contentVersion` 不一致时拒绝运行；不能静默使用更新后的脚本恢复旧对局。
 
 ### 4.8 当前 C# 数据模型需要补充的内容
@@ -1249,8 +1322,11 @@ TimingHandlerBinding
 | 当前没有通用 Effect 注册表与树执行器 | 新增 `EffectRegistry`、`EffectSpecCompiler` 和 `EffectTreeExecutor` | 所有 `Effect.*` 必须走统一校验、记录和完成判定 |
 | 当前没有固定时点处理器和一次性延迟登记 | 新增 `TimingHandlerRegistry` 与可序列化的 `TimingHandlerBinding` | 支持卡面能力在玩家收尾或最终计分时生成 Effect，同时保证恢复时不重复调用 Lua |
 | 当前目标候选由多个查询服务和 UI 协调器分别生成 | 新增 `CandidateSetResolver`、`CandidatePolicyRegistry` 和候选补丁记录 | 让城市移动、影响力、卡牌等候选统一接受卡面增删并在 Host 提交时复验 |
+| 当前 `GameState` 没有统一版本和 Effect 因果记录 | 增加 `EffectRuntimeState`，包含 `stateRevision`、节点、交互、Event、分发收据和追加式日志 | 正常恢复直接使用快照，同时保留幂等、审计和重建所需因果记录 |
 
 现有 `GameState.Round`、`ActionRound`、`CurrentPlayerId`、玩家资源和城市位置可以先作为查询投影的数据源；但 API 返回结构应直接采用目标模型，避免 Lua 脚本绑定迁移期字段。
+
+Host 内部始终保存完整 `GameState`，但启用任何隐藏卡牌、隐藏答案或私有 Effect 结果之前，网络层必须增加 `GameStateViewProjector.BuildFor(viewerPlayerId)`，为每条连接生成独立的可见快照。投影必须同时覆盖领域状态、`EffectRuntimeState.effectNodes`、Event payload、交互候选与答案；无权限字段使用明确的遮蔽引用或完全省略。客户端不得再接收 Host 完整 `GameState` 后自行隐藏。完成该投影前，只能进行本地或全公开纵向样板，不能宣称已经支持联网隐藏信息。
 
 ### 4.9 现有卡面效果实现的迁移边界
 
@@ -1351,10 +1427,11 @@ TimingHandlerBinding
 | --- | --- | --- | --- | --- | --- | --- |
 | `CandidateSetBuilding` | 某个 Effect 正在构建合法候选 | 开放，按 `candidateKind` 过滤 | `CandidateSetResolver` | 改变移动、放置、选牌等范围的卡面能力 | C# 已生成候选池上限与基础候选、尚未创建 UI 或验证固定目标时 | 首批必须 |
 | `InteractionAnswered` | 玩家已经回答一个交互请求 | 定向 | 交互执行器 | 拥有该交互的 Effect 或卡面处理器 | Host 校验并记录答案后、继续父 Effect 前 | 首批必须 |
-| `EffectCompleted` | 一个语义 Effect 及阻塞子树已经结束 | 开放，显式订阅 | Effect 树执行器 | 监听特定 Effect 类型或来源的能力 | 节点以成功或规则失败进入终态时 | 首批必须，订阅范围需限制 |
-| `RoundStarted` | 第 N 回合开始 | 开放 | 回合主链执行器 | 回合开始能力、企业升级与角色牌盖放流程 | 回合开始节点首次进入 `Running` 时 | 首批必须 |
+| `EffectCompleted` | 一个 Effect 的主体、固有子流程和成功语义响应已经结算，进入通用完成响应窗口 | 开放，显式订阅 | Effect 树执行器 | 监听特定 Effect 类型或来源的能力 | 节点已得到 `pendingOutcome`、此前阻塞已解除但尚未写入终态时 | 首批必须，订阅范围需限制 |
+| `RoundStarted` | 第 N 回合开始 | 开放 | 回合主链执行器 | 回合开始能力与区域开放；企业升级后续补充 | 回合开始节点开始结算时；首次回合须先完成入场和开局金券前置结算 | 首批必须 |
+| `PlayerEntered` | 玩家完成开局入场选点 | 世界规则主处理器，可显式订阅 | 入场固有 Effect `flow.player.enter` | B-01 资源奖励与入场翻事件牌 | 城市、核心指挥塔、地点开放已提交后；每人仅开局一次 | 已补入场主链 |
 | `CharacterCardCovered` | 一名玩家完成盖放角色牌 | 开放但公共数据遮蔽 | 盖放角色牌链 | 盖放后能力、扩展观察者 | 角色牌已进入盖放区并提交后 | 用户指定首批 |
-| `CharacterCoverCompleted` | 本回合所有玩家均完成盖放 | 开放 | 回合开始子树 | 行动轮开始前能力 | 最后一名玩家的 `CharacterCardCovered` 响应完成后 | 首批建议 |
+| `CharacterCoverCompleted` | 本回合所有玩家均完成盖放 | 开放 | 统一盖放角色牌主链节点 | 行动轮开始前能力 | 所有玩家的 `CharacterCardCovered` 响应完成后 | 首批建议 |
 | `PlayerActionWindowStarted` | 某玩家行动窗口开始 | 定向并允许观察者 | 回合主链执行器 | 快速行动、持续限制、行动入口提供者 | 对应行动轮玩家节点进入 `Running` 时 | 首批必须 |
 | `PlayerActionWindowCompleted` | 某玩家行动窗口结束 | 开放 | 回合主链执行器 | 本行动轮结束能力与状态清理 | 窗口预算、交互和阻塞子树全部完成后 | 首批必须 |
 | `CollectionStarted` | 本回合采集节点开始 | 开放 | 回合主链执行器 | 采集相关能力 | 采集主节点进入 `Running` 时 | 首批必须 |
@@ -1372,10 +1449,10 @@ TimingHandlerBinding
 | `FacilityEntryEffectActivated` | 新建设施牌的入场效果开始 | 定向 | 建设链 | 目标设施牌入场能力 `current` | 设施牌已进入城市面板并获得牌面分后 | 首批必须 |
 | `BeforeCityMove` | 一次移动城市 Effect 即将开始准备目标 | 开放，显式订阅 | 移动城市链 | 移动前反应能力 | 构建候选和要求玩家选择目标之前 | 用户指定首批 |
 | `CityMoveCompleted` | 一次移动城市的内核步骤已经完成 | 开放，显式订阅 | 移动城市链 | 移动后能力、是否翻开事件牌的 Lua 检测 | 位置改变、规则指定的影响力清除和出发地影响力处理完成后 | 用户指定首批 |
-| `InfluencePlaced` | 一个独立放置影响力 Effect 完成 | 开放，显式订阅 | 放置影响力 Effect | 放置后能力 | 影响力进入槽位并提交后 | 首批建议 |
+| `InfluencePlaced` | 一个放置影响力 Effect 完成 | 开放，显式订阅 | 独立放置 Effect，或替换影响力调用的放置子 Effect | 放置后能力 | 影响力进入槽位并提交后 | 首批建议 |
 | `InfluenceRemoved` | 一个移除影响力 Effect 完成 | 开放，显式订阅 | 独立移除 Effect，或替换影响力调用的移除子 Effect | 被移除后能力 | 影响力离开槽位并到达规则去向后 | 用户指定首批 |
 | `InfluenceMoved` | 一个移动影响力 Effect 完成 | 开放，显式订阅 | 移动影响力 Effect | 移动后能力 | 同一影响力实例提交新槽位后 | 首批建议 |
-| `InfluenceReplaced` | 一个替换影响力 Effect 完成 | 开放，显式订阅 | 替换影响力 Effect | 替换后能力 | 替换整体结果提交后 | 首批建议 |
+| `InfluenceReplaced` | 一个替换影响力 Effect 成功完成 | 开放，显式订阅 | 替换影响力 Effect | 只监听完整替换的能力 | 移除、放置及其 Event 响应全部完成后 | 首批建议 |
 | `LocationsOpenStateChanged` | 一组地块的开放状态已经改变 | 开放，显式订阅 | 改变地块开放状态 Effect | 区域开放后的能力 | 整组地块状态在一个提交边界写入后 | 按卡面补充 |
 | `EventCardRevealed` | 事件牌已经翻开 | 定向并允许观察者 | 翻开事件牌链 | 目标事件牌与翻牌观察者 | 抽牌结果、公开范围和可选资源点指示物数据在同一提交边界确定后 | 首批必须 |
 | `EventCardResolved` | 事件牌选项结算完成 | 开放，显式订阅 | 翻开事件牌链 | 事件结算后能力 | 选项 Effect式与事件牌移动全部完成后 | 首批建议 |
@@ -1389,10 +1466,10 @@ TimingHandlerBinding
 | --- | --- | --- | --- | --- |
 | `CandidateSetBuilding` | `candidateSetId`、`candidateKind`、`sourceEffectId`、`executingPlayerId`、`candidatePoolIds`、`defaultCandidateIds`、`currentIds`、`context` | `candidatePatches` | 同步阻塞候选准备；不得创建长期等待 | Lua 只能返回 Candidate 补丁 |
 | `InteractionAnswered` | `requestId`、`ownerEffectId`、`answeringPlayerId`、`answer`、`answerRevision` | `effects` | 是 | 定向回到请求所有者；公开订阅不得读取隐藏答案 |
-| `EffectCompleted` | `effectId`、`effectTypeId`、`executingPlayerId`、`sourceRef`、`outcome = completed / failed`、`failureReason`、`normalizedResult`、`commitSequence` | `effects` | 由 Event 定义决定 | 规则失败也形成；只有成功节点才产生各 Effect 自己的成功语义 Event |
+| `EffectCompleted` | `effectId`、`effectTypeId`、`executingPlayerId`、`sourceRef`、`outcome = completed / failed`、`failureReason`、`normalizedResult`、`commitSequence` | `effects` | 是；Event 响应使源节点进入或保持 `Blocked` | `outcome` 是待落入的终态，不表示源节点已终止；规则失败也形成；只有成功节点才产生自己的成功语义 Event；每节点只分发一次 |
 | `RoundStarted` | `roundExecutionId`、`roundNumber`、`playerOrder`、`startPlayerId`、`milestones` | `effects` | 是，阻塞回合开始节点 | 同一回合只形成一次；无需顺序的全员任务由 `Effect.OpenPlayerTaskGroup` 表达 |
 | `CharacterCardCovered` | `playerId`、`cardInstanceRef`、`coverIndex`、`allPlayersCovered` | `effects` | 是，阻塞该玩家盖放子节点完成 | 非所有者和无权限观察者看到遮蔽引用，不得获得 `definitionId` |
-| `CharacterCoverCompleted` | `roundExecutionId`、`roundNumber`、`coveredPlayerIds` | `effects` | 是，阻塞回合开始节点完成 | 不包含各玩家盖放牌定义 ID |
+| `CharacterCoverCompleted` | `roundExecutionId`、`roundNumber`、`coverNodeId`、`coveredPlayerIds` | `effects` | 是，阻塞统一盖放角色牌节点完成 | `coveredPlayerIds` 固定按本回合 `playerOrder` 排列；不包含各玩家盖放牌定义 ID |
 | `PlayerCleanupStarted` | `roundExecutionId`、`roundNumber`、`playerId`、`cleanupNodeId` | `effects` | 是，阻塞该玩家收尾节点 | 固定调用 `playerCleanup` 处理区 |
 | `PlayerFinalScoringStarted` | `finalScoringId`、`playerId`、`scoringNodeId`、`scoringCategory` | `effects` | 是，阻塞对应计分节点 | 固定调用 `finalScoring` 处理区 |
 | `CharacterEffectActivated` | `playerId`、`cardInstanceRef`、`abilityId`、`mode`、`orderIndex` | `effects` | 是 | 以 `abilityId` 为 `routeKey` 定向调用 |
@@ -1400,9 +1477,28 @@ TimingHandlerBinding
 | `CityStyleSpecialActionActivated` | `playerId`、`cityStyleInstanceRef`、`specialActionId`、`markerInstanceId` | `effects` | 是 | 以 `specialActionId` 为 `routeKey` 定向调用 |
 | `BeforeCityMove` | `moveEffectId`、`playerId`、`sourceLocationId`、`movementMode`、`candidateScope` | `effects` | 是，响应完成后才构建候选 | 尚无 `targetLocationId` 和 `routeId`；候选增删由后续 `CandidateSetBuilding` 处理 |
 | `CityMoveCompleted` | `moveEffectId`、`playerId`、`sourceLocationId`、`targetLocationId`、`routeId`、`movementMode`、`removedInfluenceIds`、`sourceInfluenceResult` | `effects` | 是，响应子树阻塞移动城市节点最终完成 | Lua 可检查目标是否已有资源点指示物，并按需返回 `Effect.RevealEventCard` |
-| `InfluenceRemoved` | `influenceRefBeforeRemoval`、`fromSlot`、`destination`、`reasonId`、`executingPlayerId` | `effects` | 默认是 | 移动影响力不产生；替换影响力通过真实的移除子 Effect 产生 |
+| `InfluenceRemoved` | `removeEffectId`、`influenceRefBeforeRemoval`、`fromSlot`、`destination`、`reasonId`、`executingPlayerId`、`causeKind`、`parentOperationEffectId`、`replaceEffectId?` | `effects` | 默认是 | 移动影响力不产生；替换子 Effect 产生时，`causeKind = replace` 且必须填写 `replaceEffectId` |
+| `InfluencePlaced` | `placeEffectId`、`influenceRefAfterPlacement`、`toSlot`、`source`、`ownerSubject`、`executingPlayerId`、`causeKind`、`parentOperationEffectId`、`replaceEffectId?` | `effects` | 默认是 | 替换子 Effect 产生时，`causeKind = replace` 且必须与移除 Event 使用相同 `replaceEffectId` |
+| `InfluenceReplaced` | `replaceEffectId`、`removedInfluenceRef`、`placedInfluenceRef`、`slot`、`removeEffectId`、`placeEffectId`、`executingPlayerId` | `effects` | 是，阻塞替换影响力节点最终完成 | 仅在移除和放置均成功且各自 Event 响应完成后形成 |
 
-`EffectCompleted` 不应无条件广播给所有脚本。只有显式订阅某个 `effectTypeId`、来源标签或能力范围的处理器才会收到；否则卡面作者应优先订阅更具体的语义 Event。
+`EffectCompleted` 不应无条件广播给所有脚本。只有显式订阅某个 `effectTypeId`、来源标签或能力范围的处理器才会收到；否则卡面作者应优先订阅更具体的语义 Event。它是终态前的最后一个可阻塞响应窗口：分发完成且返回子节点全部进入成功或失败终态后，源节点才从 `Blocked` 进入 payload 所声明的 `Completed` 或 `Failed`。
+
+### 6.2.1 玩家入场事件（2026-09-19 补充）
+
+| `eventType` | 最小 payload | `responseKind` | 阻塞与时机 |
+| --- | --- | --- | --- |
+| `PlayerEntered` | `player`：玩家稳定引用；`resourcePoint`：入场地点稳定引用 | `effects` | 城市、核心指挥塔与地点开放已提交后形成；响应子树阻塞本人的入场主链节点 |
+
+该事件只由开局固有 Effect `flow.player.enter` 发布，每位玩家入场只形成一次。入场选点使用 `entrance.location` 交互和通用 `AnswerInteraction`。普通 `CityMoveCompleted`、探索或以后到达同一地点不形成 `PlayerEntered`。
+
+世界 Lua 主处理器 `world.player-entered`（路由 `entrance`）读取 `ctx.payload.player` 和 `ctx.payload.resourcePoint`。稳定引用进入 Lua 时可按其 ID 使用。当前规则按顺序返回：
+
+1. 地点为 B-01：对该玩家分别挂 `Effect.GainResource`，源岩 `originium`、源石 `originium_shard`、异铁 `iron` 各 2。
+2. 地点没有资源点标记：挂 `Effect.RevealEventCard`，参数为 `player`、`resourcePoint`、`eventDeck = 'main'`、`eventColor = 'green'`、`placeResourcePointIndicator = true`。
+
+上述效果复用通用资源和事件牌结算，事件牌选择继续挂在原入场子树下。不能提前激活下一名玩家，也不能为入场另开旧式 `PendingCardSession`。已有标记只影响是否翻牌，不取消 B-01 的入场奖励。牌堆耗尽或内容处理器缺失应报错并停止推进，不得静默跳过。恢复时沿用持久化事件与节点，避免重复发放奖励、重复翻牌。
+
+`flow.player.enter` 属于内核固有流程层，不加入卡面最小 Effect API；卡牌不能任意调用它来重新领取入场奖励。首次回合的入场前缀、开局金券时机见《Lua效果树与回合主链设计》7.1.1。
 
 ### 6.3 移动城市 Event 与事件牌检测顺序
 
@@ -1429,9 +1525,45 @@ BeforeCityMove（Lua 可返回移动前子 Effect）
 
 这里的 `CityMoveCompleted` 表示移动城市的内核步骤完成并形成规则事实，不表示它的 Lua 响应已经结束。Event 发出后，`MoveCity` 节点仍等待该 Event 产生的阻塞子树；事件牌结算完成后才进入最终 `Completed`。不另行暴露只改变停靠位置的 `Effect` 或中间位置 Event。
 
-城市移动清除对手影响力时，因为流程显式调用 `RemoveInfluence`，每个成功清除都会形成 `InfluenceRemoved`。`MoveInfluence` 只改变同一影响力实例的槽位，不形成内部的 `InfluenceRemoved`/`InfluencePlaced`。`ReplaceInfluence` 则确实调用移除与固定原位置放置两个子 Effect，因此会依次形成 `InfluenceRemoved`、`InfluencePlaced`，外层完成时还可形成 `InfluenceReplaced`。
+城市移动清除对手影响力时，因为流程显式调用 `RemoveInfluence`，每个成功清除都会形成 `InfluenceRemoved`。`MoveInfluence` 只改变同一影响力实例的槽位，不形成内部的 `InfluenceRemoved`/`InfluencePlaced`。
 
-### 6.4 复杂 Event 补充模板
+### 6.4 影响力移除、放置与替换 Event
+
+一次成功的 `ReplaceInfluence` 必须产生三类可分别订阅的 Event，顺序固定为：
+
+```text
+RemoveInfluence 子 Effect 提交
+  → InfluenceRemoved
+  → InfluenceRemoved 响应子树完成
+PlaceInfluence 子 Effect 在原槽位提交
+  → InfluencePlaced
+  → InfluencePlaced 响应子树完成
+ReplaceInfluence 外层确认完整替换成功
+  → InfluenceReplaced
+  → InfluenceReplaced 响应子树完成
+  → ReplaceInfluence 最终完成
+```
+
+三类 Event 的含义不能互相替代：
+
+- `InfluenceRemoved` 表示旧影响力确实离开原槽位，供“影响力被移除时”能力订阅。
+- `InfluencePlaced` 表示新影响力确实进入槽位，供“影响力被放置时”能力订阅。
+- `InfluenceReplaced` 表示上述两步共同构成一次完整替换，供“影响力被替换时”能力订阅。
+
+替换内部的移除与放置 Event 必须携带 `causeKind = replace` 和相同的 `replaceEffectId`；这里的 `replaceEffectId` 就是外层 `ReplaceInfluence` 节点 ID。`causeKind` 第一版固定枚举为 `direct`、`move_city`、`place_road`、`replace` 和 `other_intrinsic_flow`。`parentOperationEffectId` 始终指直接调用该子 Effect 的固有效果链，`replaceEffectId` 专门提供给需要关联完整替换的订阅者；在直接挂于替换节点的第一版结构中二者相同，但含义不同，不能由 Lua 自行填写。
+
+Lua 既可以观察所有真实移除或放置，也可以按 `causeKind` 过滤替换产生的子步骤；`InfluenceReplaced` 则通过 `removeEffectId`、`placeEffectId` 回指同一次替换的两个子 Effect。独立移除、城市移动清除、放置公路清除等操作使用对应 `causeKind`，不得伪装成替换。
+
+第一版替换固定采用 `placementFailurePolicy = keep_removal`，Lua 可以省略该字段，也不能传入其他值。详细结果如下：
+
+- 移除子节点失败：不创建放置子节点；外层替换进入 `Failed(remove_failed)`，没有状态变化，也不形成三类成功语义 Event。
+- 移除子节点成功：移除已经提交，发布 `InfluenceRemoved` 并完整处理其响应。响应可能改变原槽位或替换来源的最新状态，系统不预留槽位和供应。
+- 随后按最新 `stateRevision` 复验固定原槽位和替换来源。若放置失败，放置子节点进入 `Failed`；外层不继承该失败，而是进入 `Completed`，标准化结果记录 `outcome = removed_only`、`removedInfluenceRef`、`slot`、`placeFailureReason`。只发布已经真实发生的 `InfluenceRemoved`，不得发布 `InfluencePlaced` 或 `InfluenceReplaced`。
+- 放置成功且 `InfluencePlaced` 响应结束后，发布 `InfluenceReplaced`；其响应结束后外层进入 `Completed`，标准化结果记录 `outcome = replaced`。
+
+“只移除”是替换固有效果链认可的完成结果，不是父节点失败，也不触发回滚。需要完整成功或不改变状态的其他规则不能复用第一版 `ReplaceInfluence`，应另行定义具有原子预留语义的 Effect。
+
+### 6.5 复杂 Event 补充模板
 
 第 6.1 节目录与第 6.2 节最小 payload 已足够描述简单事实 Event，不要求为每个 Event 重复填写本节。只有涉及定向路由、隐藏信息、多个订阅者排序、阻塞响应、候选补丁或恢复去重的 Event，才复制本模板补充完整合同。第一阶段优先用于 `CandidateSetBuilding`、`RoundStarted`、`CharacterCardCovered`、`InteractionAnswered`、`BeforeCityMove` 和 `CityMoveCompleted`。
 
@@ -1490,15 +1622,15 @@ Event 数据：
 | --- | --- | --- | --- |
 | P0 | `CandidateSetBuilding` | 城市移动和影响力选点必须先接入动态卡面限制 | `context` 的各 `candidateKind` 专用字段、候选数量上限 |
 | P0 | `InteractionAnswered` | UI 回答后需要确定性继续拥有该请求的 Effect | 隐藏答案的观察权限、答案标准化结构 |
-| P0 | `EffectCompleted` | 父节点完成判断、结果驱动后续 Lua 和恢复均需要统一完成事实 | 哪些结果字段公开、哪些 Effect 禁止开放订阅 |
+| P0 | `EffectCompleted` | 为结果驱动的 Lua 提供统一的终态前完成响应窗口，并用分发收据保证恢复不重复挂载 | 哪些结果字段公开、哪些 Effect 禁止开放订阅 |
 
 ### 7.2 回合主链 Event
 
 | 优先级 | `eventType` | 对应回合节点 | 形成时机 | payload 待确认项 |
 | --- | --- | --- | --- | --- |
-| P0 | `RoundStarted` | 第 N 回合开始 | 节点首次进入 `Running` | Lua 根据回合与玩家数添加红区开放及按玩家顺序排列的企业升级 Effect |
-| P0 | `CharacterCardCovered` | 回合开始下的单人盖放子节点 | 单人盖放提交后 | 隐藏卡引用的 Host/所有者/观察者三种视图 |
-| P0 | `CharacterCoverCompleted` | 第 N 回合开始 | 所有人盖放与对应响应完成后 | 是否允许该 Event 再创建阻塞响应 |
+| P0 | `RoundStarted` | 第 N 回合开始 | 节点首次进入 `Running` | Lua 可按回合与玩家数添加红区开放 Effect；企业升级不属于第一批 |
+| P0 | `CharacterCardCovered` | 统一盖放角色牌节点下的单人盖放子节点 | 单人盖放提交后 | 隐藏卡引用的 Host/所有者/观察者三种视图 |
+| P0 | `CharacterCoverCompleted` | 统一盖放角色牌 | 所有人盖放与对应响应完成后 | `coveredPlayerIds` 固定按 `playerOrder` 排列 |
 | P0 | `PlayerActionWindowStarted` | 两轮玩家行动节点 | 玩家窗口进入 `Running` | 行动预算、轮次和角色牌限制快照 |
 | P0 | `PlayerActionWindowCompleted` | 两轮玩家行动节点 | 窗口满足完成条件后 | 放弃的额外预算记录 |
 | P0 | `CollectionStarted` | 采集节点 | 采集节点进入 `Running` | 各玩家子任务 ID 与开放应答集合 |
@@ -1508,17 +1640,13 @@ Event 数据：
 | P0 | `FinalScoringStarted` | 最终计分根节点 | 最终回合结束后 | 固定创建区控、资源、卡面三个类别节点 |
 | P0 | `PlayerFinalScoringStarted` | 各计分类别下的玩家节点 | 轮到该类别中的对应玩家时 | `scoringCategory` 与该类别允许调用的计分处理器 |
 
-以四人局红区开放回合为例，基础规则 Lua 对 `RoundStarted` 返回一个有序 Effect式：
+以红区开放回合为例，基础规则 Lua 对 `RoundStarted` 返回一个 Effect式：
 
 ```text
 Effect.SetLocationsOpen(红区地块, true)
-→ Effect.UpgradeEnterprise(P1)
-→ Effect.UpgradeEnterprise(P2)
-→ Effect.UpgradeEnterprise(P3)
-→ Effect.UpgradeEnterprise(P4)
 ```
 
-玩家顺序取自 Event 的 `playerOrder`，不是在 Lua 中写死。四个升级 Effect 是普通有序兄弟节点，不使用开放玩家任务组；前一名玩家完成选择、升级和奖励结算后，后一名玩家才开始。回合数与玩家数条件由该 Lua 订阅的过滤器或处理函数判断。
+回合数与玩家数条件由该 Lua 订阅的过滤器或处理函数判断；红区地块作为稳定 `LocationRef[]` 传给 `Effect.SetLocationsOpen`，C# 在一个提交边界内更新集合。Lua 返回空 `EffectSpec[]` 或没有有效订阅者时，`RoundStarted` 不产生子节点，回合开始节点直接进入下一主链阶段。开放红区引发的企业升级暂不纳入第一批；后续确认规则后再按 `playerOrder` 添加有序兄弟 Effect，不由 `SetLocationsOpen` 在 C# 中隐式触发。
 
 ### 7.3 定向卡面入口 Event
 
@@ -1535,10 +1663,10 @@ Effect.SetLocationsOpen(红区地块, true)
 | --- | --- | --- | --- | --- |
 | P0 | `BeforeCityMove` | `Effect.MoveCity` | 不适用，候选构建前 Event | 移动前追加规则效果；候选修改应使用之后的 `CandidateSetBuilding` |
 | P0 | `CityMoveCompleted` | `Effect.MoveCity` | 是，内核移动步骤结束后一次 | 移动后卡面能力，以及 Lua 检测是否追加事件牌 Effect |
-| P0 | `InfluenceRemoved` | `Effect.RemoveInfluence` | 是 | 独立移除、城市移动清除或替换影响力的移除子 Effect |
-| P1 | `InfluencePlaced` | `Effect.PlaceInfluence` | 是 | 放置后能力 |
+| P0 | `InfluenceRemoved` | `Effect.RemoveInfluence` | 每个真实移除子 Effect 一次 | 独立移除、城市移动清除或替换影响力的移除子 Effect；通过 `causeKind` 区分来源 |
+| P1 | `InfluencePlaced` | `Effect.PlaceInfluence` | 每个真实放置子 Effect 一次 | 独立放置或替换影响力的放置子 Effect；通过 `causeKind` 区分来源 |
 | P1 | `InfluenceMoved` | `Effect.MoveInfluence` | 是；不补发内部移除/放置 | 移动影响力后能力 |
-| P1 | `InfluenceReplaced` | `Effect.ReplaceInfluence` | 外层一次；内部正常产生移除/放置 Event | 替换整体完成后的能力 |
+| P1 | `InfluenceReplaced` | `Effect.ReplaceInfluence` | 成功替换的外层一次；内部先产生移除、放置 Event | 只监听完整替换成功的能力 |
 | P1 | `LocationsOpenStateChanged` | `Effect.SetLocationsOpen` | 是，整组一次 | 地图区域开放或关闭后的能力 |
 
 ## 8. 通用数据结构草稿
@@ -1559,12 +1687,12 @@ RuleEvent
 ├─ payload
 ├─ responseKind = effects / candidatePatches / none
 ├─ stateRevision
-├─ sequence
+├─ commitSequence
 ├─ definitionVersion
 └─ visibility
 ```
 
-`eventId` 必须能由来源节点和语义时点稳定生成；`ownerNodeId` 是 Event 响应所阻塞或附着的流程节点，`sourceEffectId` 是产生事实的 Effect，两者可能相同也可能不同。`payload` 在进入 Lua 前按 `visibility` 投影，不能因为脚本运行在 Host 就暴露隐藏牌面。
+`eventId` 必须能由来源节点和语义时点稳定生成；`ownerNodeId` 是 Event 响应所阻塞或附着的流程节点，`sourceEffectId` 是产生事实的 Effect，两者可能相同也可能不同。`commitSequence` 是创建该 Event 的日志条目序号。`payload` 在进入 Lua 前按 `visibility` 投影，不能因为脚本运行在 Host 就暴露隐藏牌面。
 
 ### 8.2 `EffectSpec` 与 Lua 返回结果
 
@@ -1590,9 +1718,53 @@ EffectNodeResult
 
 `EffectSpec` 是 Lua 构造函数产生的临时描述，不包含节点 ID、父节点 ID 或 Blocker。C# 编译返回结果时，使用当前 `LuaInvocationContext.attachmentParentEffectId` 建立实际子节点，并用 Event、订阅和数组路径生成稳定节点 ID。
 
-Effect 被玩家放弃后进入终态 `Failed`，并记录 `failureReason = player_declined`、决定玩家和回答请求 ID。`Completed` 和 `Failed` 都属于“已经完成结算”的终态，都会解除父节点等待；条件式等父节点可以读取子节点结果，决定是否创建后续子节点。脚本异常、数据损坏等不可继续的内核故障应使用独立 `Faulted` 状态，不能混入规则失败。
+Effect 被玩家放弃后先记录 `pendingOutcome = failed`、`failureReason = player_declined`、决定玩家和回答请求 ID；通用完成响应窗口结束后才进入终态 `Failed`。`Completed` 和 `Failed` 都属于“已经完成结算”的终态，都会解除父节点等待；条件式等父节点可以读取子节点结果，决定是否创建后续子节点。脚本异常、数据损坏等不可继续的内核故障应使用独立 `Faulted` 状态，不能混入规则失败。
 
-### 8.3 `InteractionRequest`
+### 8.3 `EffectNodeRuntimeState` 与持久化
+
+```text
+EffectNodeRuntimeState
+├─ effectId
+├─ effectTypeId
+├─ parentEffectId
+├─ status = created / ready / running / blocked / completed / failed / faulted
+├─ pendingOutcome = none / completed / failed
+├─ normalizedArguments
+├─ normalizedResult
+├─ failureReason
+├─ childEffectIds[]
+├─ blockerIds[]
+├─ completedEventId
+└─ lastCommitSequence
+
+EffectRuntimeState
+├─ schemaVersion
+├─ status = active / paused_fault
+├─ stateRevision
+├─ nextCommitSequence
+├─ effectNodes[]
+├─ interactionRequests[]
+├─ ruleEvents[]
+├─ dispatchReceipts[]
+└─ journal[]
+```
+
+节点状态转换固定为：
+
+- `Created → Ready → Running`；主体得到结果且没有阻塞项时，`Running → Completed/Failed`。
+- 当前主体步骤创建未结束交互、Event 响应、子节点或额外 Blocker 时进入 `Blocked`；父执行器可在其中推进自己的内部阶段并继续保持 `Blocked`。最终记录 `pendingOutcome` 且全部解除后，`Blocked → Completed/Failed`。
+- `Failed` 子节点只解除阻塞，不自动改写父节点的 `pendingOutcome`。父执行器若要改变结果，必须在自己的状态提交记录中显式完成。
+- `Created`、`Ready`、`Running`、`Blocked` 都可因不可恢复的内核故障进入 `Faulted`；`Faulted` 不作为普通成功/失败终态自动放行父节点。第一版沿父关系传播到所属 Effect 根，并把 `EffectRuntimeState.status` 置为 `paused_fault`。
+
+第一版使用“`GameState` 中的可继续运行快照 + 快照内的追加式 `journal[]`”。内部 `RuleCommit` 是最小原子提交点：每个实际改变领域状态或 Effect 运行状态的 `RuleCommit` 都递增一次 `stateRevision`；同一 `RuleCommit` 追加的日志取得连续 `commitSequence`，并共享提交后的 revision。规则状态、节点状态、Event、分发收据和日志必须一起提交，不能只更新其中一部分。正常恢复直接加载快照；审计或重建才从初始状态按日志顺序重放。快照与日志的 schema、末尾序号或校验不一致时拒绝继续。完整 `journal[]` 只保存在 Host 存档，不进入客户端 `GameStateView` 的常规同步 payload。
+
+新对局固定从 `stateRevision = 0`、`nextCommitSequence = 1` 开始。初始化和第一回合主链创建也使用正常 Host 事务及正数日志序号；纯查询和被拒绝命令不递增版本或消耗日志序号。
+
+`GameSession.Submit` 是迁移期外层原子发布边界：在完整 `GameState` 工作副本上运行命令和所有可同步推进的 Effect；每个 `RuleCommit` 分别递增工作副本 revision，后续 Lua 调用绑定当时的最新 revision。遇到外部输入等待点后统一校验并一次替换正式状态。拒绝、异常或最终校验失败时丢弃工作副本，其中产生的 revision 和日志序号也不算已使用。旧处理器同样只接收工作副本，避免旧服务直接污染正式状态。工作副本由显式 `GameStateCloneService` 创建，不依赖客户端序列化往返；克隆遗漏字段必须由结构完整性测试阻止。
+
+为兼容 Unity `JsonUtility`，`normalizedArguments`、`normalizedResult`、Event `payload` 和 `normalizedAnswer` 使用带 `kind` 标签的可序列化 DTO，只允许布尔、整数、字符串、稳定引用、同类数组，以及由有序 `name/value` 项组成的对象。不得保存 `Dictionary`、`object`、接口实现、Lua table 或 Unity 对象引用。每种 Effect、Event 和 Interaction 以稳定 schema ID 与版本校验 DTO。
+
+### 8.4 `InteractionRequest`
 
 ```text
 InteractionRequest
@@ -1616,7 +1788,7 @@ InteractionRequest
 
 交互请求是 Effect 树中的可恢复阻塞对象。关闭界面不改变 `status`；只有 Host 接受合法答案、规则明确允许的取消，或候选永久失效后按失败策略处理，才能解除对应 Blocker。
 
-### 8.4 `CandidateSetDraft`、`CandidatePatch` 与解析记录
+### 8.5 `CandidateSetDraft`、`CandidatePatch` 与解析记录
 
 ```text
 CandidateSetDraft
@@ -1655,7 +1827,7 @@ CandidateResolutionRecord
 
 Lua 只创建 `CandidatePatch`；其来源、应用序号和每一步结果由 C# 填写。`CandidateResolutionRecord` 可以随所属 Effect 或 `InteractionRequest` 保存，使重连恢复使用相同候选，不依赖再次执行 Lua。
 
-### 8.5 固有效果链描述
+### 8.6 固有效果链描述
 
 固有效果链在 Lua 侧仍使用普通 `EffectSpec`，不另设 `IntrinsicFlowRequest`。C# 根据 `EffectRegistry.executorKind = intrinsicFlow` 识别它，并由对应 `flowBuilder` 创建固定子节点。
 
@@ -1678,7 +1850,7 @@ OpenPlayerTaskGroupState
 
 组内“任意顺序”只表示多个玩家可以同时看到待办并以任意顺序提交，不表示 C# 并发写 `GameState`。Host 仍以命令提交序号逐条复验和提交；`revealPolicy = after_all` 时先分别保存遮蔽答案，等完成屏障满足后再统一公开并生成后续 Effect。
 
-### 8.6 固定处理区与 Lua Event 订阅声明
+### 8.7 固定处理区与 Lua Event 订阅声明
 
 ```text
 ContentAbilityDefinition
@@ -1687,6 +1859,7 @@ ContentAbilityDefinition
 │  ├─ current
 │  ├─ playerCleanup
 │  └─ finalScoring
+├─ continuationHandlers[]
 └─ eventSubscriptions[]
 
 EffectHandlerDefinition
@@ -1694,6 +1867,7 @@ EffectHandlerDefinition
 ├─ activationPolicy
 ├─ scope
 ├─ cancelPolicy
+├─ priority = 0
 └─ orderPolicy
 
 EventSubscriptionDefinition
@@ -1704,10 +1878,26 @@ EventSubscriptionDefinition
 ├─ responseKind
 ├─ candidateKindFilter
 ├─ activationPolicy
+├─ priority = 0
 └─ orderPolicy
+
+ContinuationHandlerDefinition
+├─ handlerId
+├─ handler
+├─ allowedSourceEffectTypes[]
+└─ responseKind = effects
+
+ContinuationBinding
+├─ bindingId
+├─ sourceEffectId
+├─ contentInstanceId
+├─ abilityId
+├─ handlerId
+├─ definitionVersion
+└─ status = registered / attached / completed / cancelled
 ```
 
-固定处理区用于当前结算、玩家收尾和最终计分三个高频规则时点；`eventSubscriptions` 只声明其他规则时机。两者在运行时都由 Event 唤起，并共享同一套 Lua 调用、`EffectSpec` 编译、挂树、阻塞和幂等机制。
+固定处理区用于当前结算、玩家收尾和最终计分三个高频规则时点；`continuationHandlers` 声明由某个具体 Effect 结果定向唤起的一次性后续处理器；`eventSubscriptions` 声明其他开放或定向规则时机。三者在运行时都由 Event 唤起，并共享同一套 Lua 调用、`EffectSpec` 编译、挂树、阻塞和幂等机制。稳定比较键中的 `handlerId` 对普通订阅取 `subscriptionId`，对 continuation 取 `handlerId`，对固定处理区取 C# 生成的稳定处理区键。
 
 ## 9. 已确认决定与剩余细节
 
@@ -1722,22 +1912,33 @@ EventSubscriptionDefinition
 | 移动城市完成 Event | 位置改变、规则指定的影响力清除和出发地影响力处理完成后形成 `CityMoveCompleted`；Event 响应完成后 `MoveCity` 节点才最终完成 | 2026-09-14 |
 | 移动后事件牌检测 | 不属于 C# 移动城市固有链；由 `CityMoveCompleted` 的 Lua 订阅检查目标状态并按需返回 `Effect.RevealEventCard` | 2026-09-14 |
 | 事件牌与资源点指示物 | `Effect.RevealEventCard` 增加 `placeResourcePointIndicator` 和条件必填的 `resourcePoint: LocationRef`；资源类型由翻出的牌确定，地图数据与抽牌结果在同一提交边界写入，表现插在奖励选择前后均不改变规则 | 2026-09-14 |
-| 影响力移动与替换 Event | `MoveInfluence` 不产生内部移除/放置 Event；`ReplaceInfluence` 调用真实的移除与固定原位放置子 Effect，因此产生 `InfluenceRemoved`、`InfluencePlaced`，外层再产生 `InfluenceReplaced` | 2026-09-14 |
+| 影响力移动与替换 Event | `MoveInfluence` 不产生内部移除/放置 Event；一次成功的 `ReplaceInfluence` 按固定顺序产生 `InfluenceRemoved`、`InfluencePlaced`、`InfluenceReplaced` 三类 Event，三者用 `replaceEffectId` 关联且可分别订阅 | 2026-09-14 |
+| 替换的部分完成 | 第一版 `ReplaceInfluence` 固定采用 `keep_removal`；移除成功而放置失败时外层为 `Completed(removed_only)`，不回滚且不产生放置/替换 Event | 2026-09-14 |
 | 只改变移动城市位置的 Effect | 不向 Lua 暴露 | 2026-09-14 |
 | `CharacterCardCovered` 隐藏信息 | 真实定义只定向提供给所有者或目标卡处理器；无权限观察者只得到遮蔽引用 | 2026-09-14 |
 | 城市样式收尾复位 | 写在城市样式 Lua 的 `playerCleanup`，通过 `Effect.OperatePlayerMarker` 完成，不使用具体样式 C# 模板 | 2026-09-14 |
-| 红区开放与企业升级 | 指定回合的 `RoundStarted` Lua 依次添加红区开放和按 `playerOrder` 排列的四个企业升级 Effect；按序结算，不使用开放玩家任务组 | 2026-09-14 |
+| 红区开放与企业升级 | 指定回合的 `RoundStarted` Lua 添加 `SetLocationsOpen`，一次提交目标资源点集合；没有返回子节点时直接推进主链。开放导致的企业升级暂不纳入第一批，后续再由 Lua 按 `playerOrder` 添加有序兄弟 Effect，不在 C# 中隐式触发 | 2026-09-14 |
+| 回合固定主链 | 角色牌盖放作为“第 N 回合开始”后的第二个固定主链节点；节点内部为各玩家建立盖放子任务。玩家数为 `P` 时固定主链共 `3P + 4` 个节点，四人局为 16 个 | 2026-09-14 |
 | 最终计分树 | 固定按“全员区控 → 全员资源 → 卡面计分”展开，每个类别内部再按稳定玩家顺序处理 | 2026-09-14 |
 | 基础角色牌文字 | 已核对，当前表格可作为 Lua 迁移的规则语义依据 | 2026-09-14 |
-| Effect 主动放弃 | 多数 Effect 使用共同 `allowDecline`、`decisionPlayer` 等执行选项；UI 提供放弃按钮，Host 接受后把节点标为 `Failed(player_declined)`；失败是完成态且不阻塞父节点，条件式左侧失败时不执行右侧 | 2026-09-14 |
+| Effect 主动放弃 | 多数 Effect 使用共同 `allowDecline`、`decisionPlayer` 等执行选项；UI 提供放弃按钮，Host 接受后设置 `pendingOutcome = failed`；完成响应窗口结束后进入 `Failed(player_declined)` 并解除父节点阻塞 | 2026-09-14 |
+| 节点状态与失败传播 | `Running` 执行当前主体步骤，`Blocked` 等待交互/子节点并承担完成响应窗口，最终进入 `Completed` 或 `Failed`；子节点失败只解除阻塞，不自动向父节点传播，父执行器显式解释结果 | 2026-09-14 |
+| 条件式 | 条件式整体为一个节点；左侧首个失败停止剩余左侧并跳过右侧，条件式自身 `Completed(condition_not_met)`；右侧子节点失败也不自动向上传播 | 2026-09-14 |
+| Effect 持久化 | 第一版同时保存可继续运行的 `GameState/EffectRuntimeState` 快照和快照内追加日志；同事务提交，正常恢复读快照，审计重建读日志 | 2026-09-14 |
+| 动态结果 continuation | EffectSpec 可绑定同一能力预先声明的一个 `completionHandlerId`；C# 持久化一次性绑定并在来源节点 `EffectCompleted` 窗口定向调用 | 2026-09-14 |
+| Event 稳定处理器顺序 | 使用 `(routeTier, priority, contentInstanceId, abilityId, handlerId)`；定向或 continuation 先于观察订阅，priority 越小越先且默认 0，其余按 Ordinal；规则允许玩家排序时改建有限效果轮 | 2026-09-14 |
 
 ### 9.2 实现时仍需逐项填写的细节
 
+- 选择并验证具体 Lua 运行时，冻结程序集边界、脚本打包、沙箱白名单、指令/时间/内存上限以及 IL2CPP/AOT 构建策略。
+- 在各 Effect 进入编码前按第 3.8 节补齐单项合同；目前只有 `Effect.SetLocationsOpen` 已达到“首批可实现”的合同完整度。
 - 为每个 `candidateKind` 明确哪些条件属于不可突破的 `candidatePoolIds` 硬约束，哪些属于可被 `Candidate.Add` 覆写的普通基础规则。
-- 冻结稳定订阅顺序的完整比较键、默认优先级和优先级相同时的排序方式。
 - 在 `Effect.RevealEventCard` 单项合同中确定资源点指示物提交结果、资源类型来源和表现请求的记录字段。
 - 在各单项 Effect 合同中明确默认是否可放弃、决定玩家、放弃按钮出现和失效的准确时点，以及父 Effect 是否根据子节点失败结果改变后续流程。
 - 补全 `CharacterCardCovered` 的所有者、目标处理器和公共观察者三种 payload 投影 schema。
+- 为 `GameStateCloneService` 增加覆盖全部字段的结构完整性测试与性能基线；未通过前不能把工作副本事务接入正式 Host。
+- 在联网启用隐藏内容前实现并验证按连接生成的 `GameStateViewProjector`，确保 Effect 日志、隐藏答案和牌面定义不会随完整快照泄露。
+- 定义 `paused_fault` 的人工诊断、修复后恢复或终止对局入口；第一版在此之前只保证安全暂停，不保证自动修复。
 
 ## 10. 修改记录
 
@@ -1759,3 +1960,113 @@ EventSubscriptionDefinition
 | 2026-09-14 | 确认候选补丁、移动城市与事件牌时序、影响力 Event、城市样式收尾、企业升级和最终计分方案 |  |
 | 2026-09-14 | 为 Effect 增加通用主动放弃语义，并补充改变地块开放状态 Effect |  |
 | 2026-09-14 | 统一“设施牌/设施牌堆”术语，简化候选集合命名，并确认放弃产生不阻塞父节点的规则失败 |  |
+| 2026-09-14 | 将统一盖放角色牌提升为回合第二个固定主链节点，四人局主链由 15 节点调整为 16 节点 |  |
+| 2026-09-14 | 明确一次成功替换依次形成移除、放置、替换三类独立 Event，并增加来源与关联 ID |  |
+| 2026-09-14 | 冻结 Blocked 完成响应窗口、子节点失败不自动传播、条件式与替换部分完成语义，并确定快照加日志的持久化方案与定向 continuation |  |
+
+
+## 实施校核补充（2026-09-20）
+
+本节记录当前实现与设计合同的差距，不把尚未实现的规划 API 改写为“已经完成”。
+
+- `PlayerData.GetResources(PlayerRef|string)` 返回只读 `originium`、`originiumShard`、`iron`、`pureOriginium`、`goldVoucher`（保留 `goldVoucherCount` 别名）。`GameData.GetPlayers()` 的 PlayerRef 可以直接传入 PlayerData 查询；他人手牌权限仍单独校验。
+- 当前 `Effect.Choice` 已实现稳定候选 ID 选择子合同：`player`、`options`（字符串数组）、`minSelections`、`maxSelections`、`promptKey`；答案由版本化 continuation 处理。后续外部内容迁移已增加 `branches = {{id, effects}}` 单分支执行合同；`options` 的单/多选 continuation 合同继续保留，两者不能混用。
+- `lua.choice` 通过现有通用弹窗展示；renderer 仅保存本地多选草稿。选择确认后才由 Host 执行资源 Effect；不允许 UI 根据文字自行发资源或完成角色使用。
+- 极境后勤调遣：Lua 按最新快照生成最少资源候选，答案后复核并返回 GainResource(4)。坎诺特征收：Lua 生成一次选择，答案后为所有玩家返回资源扣除和金券补偿，再给发动者 1 分；金额超过单项上限时拆为有序小批次。外部内容迁移后两者内容版本为 1.3.0。
+- continuation 与激活使用同一模块版本/hash，只有初始 Choice 绑定完成回调，奖励节点不递归绑定。通用 Effect 执行器版本与内容版本分别验证。
+- 未实现宿主结算的规划构造器已从 Lua 公开表撤下，包括 Repeat、掷骰、资源分配、尚未实现的卡区操作、企业、任务组等；出售及两种卡区操作现已有下述受限实现；旧持久节点仍明确 fail-stop。字段合同、编译、注册、执行和端到端测试闭合后才重新开放。
+- 外部内容迁移已撤下 `ResolveCharacterCardEffect` 公开入口；设施 `ExecuteMainAction(facility_entry)` 和部分城市样式仍包含迁移适配，尚不是最终内容层级。迁移阻塞项见 `Lua新架构迁移结案.md`。
+
+### 只读快照参数的统一归一化（2026-09-20）
+
+真实目录脚本回归暴露：`Effect.Choice({options=ctx.payload.candidateIds})` 的候选来自只读代理，直接遍历 Lua table 的 Pairs 会把它误读成空数组。宿主现在记录自己创建的只读代理与底层值的弱引用映射，归一化和返回值预算检查均读取这些宿主值；不执行脚本任意元方法，也不把可写表暴露给 Lua。脚本无需为了传递只读数组逐项复制，后续其他通用 Effect 同样适用。
+
+### 公开构造器的实施范围（2026-09-20 审查）
+
+宿主当前公开 22 个 Effect 构造器：`Condition`、`Choice`、`GainResource`、`PayResource`、`GainScore`、`LoseScore`、`MoveCity`、`PlaceInfluence`、`RemoveInfluence`、`MoveInfluence`、`ReplaceInfluence`、`SetLocationsOpen`、`OperatePlayerMarker`、`RevealEventCard`、`CoverCharacterCard`、`SelectInfluence`、`SellResource`、`MoveFacilityCard`、`MoveCharacterCard`、`Build`、`Explore`、`ExecuteMainAction`。这份清单只表示存在宿主入口，各项参数能力仍以下列实施边界和对应验证为准，不能把全文所有规划参数都当成已实现。
+
+| 合同 | 已有入口及关键边界 |
+| --- | --- |
+| 资源与分数 | 最小 Gain/Pay 与得失分；单 Effect 数量受宿主上限约束，大额组合由 Lua 分批，不能绕过范围校验 |
+| Choice | `options` 支持稳定候选 ID 单/多选与 continuation；`branches` 支持单分支 EffectSpec 数组，选择确认后只创建选中分支，不能混传 options/minSelections/maxSelections |
+| 地图/影响力 | 放置/移除可通过请求选点，已用于入场、主要部署、雷蛇和设施；其他参数组合必须按宿主验证器核实 |
+| 城市移动 | 可以给固定目的地或省略目的地请求 UI；先完成 BeforeCityMove，再生成候选。通用候选补丁合同仍有未完成部分 |
+| 角色内容 | 十项能力均由外部 Lua 组合；`ResolveCharacterCardEffect` 已从公开表撤下，旧专用持久节点明确 fail-stop |
+| 外部内容原语 | `SelectInfluence`、`SellResource`、`MoveFacilityCard`、`MoveCharacterCard` 的当前范围见《外部内容包与Lua定义》，不代表所有规划参数都已开放 |
+| ExecuteMainAction | 现有 `grant_budget` 与 `facility_entry` 路径；不是任意主要行动的通用已实现入口 |
+| 建设、探索、事件牌、标记与盖牌 | 已有专门宿主执行路径；有实现入口不表示全部卡面已由最小 Effect 组合替代 |
+
+新增需要 UI 的构造器必须同时具备：归一化合同、宿主验证、可持久 Interaction、投影 renderer/适配、回答命令、失败/恢复测试以及真实 UI 答案编码测试。不能只在 Lua 的公开表中添加名称。
+
+
+### 2026-09-20 条件式执行顺序纠正
+
+2.6 的费用箭头必须落为 `Condition(leftEffects, rightEffects)`：左侧可以先产生支付选择请求；所有左侧子 Effect 完成后，内核才创建右侧子节点、候选和 UI。右侧可能有任意多个连续选择，不能预选右侧再把费用挪到最后。普通 Effect 式中某项 `Failed` 不自动回滚整张角色牌；`Faulted` 仍中断运行。
+
+- 极境计谋：`Condition(PayResource(3 源石), MoveCity)`。通用 `MoveCity` 支持省略目标，由执行节点实时请求目标；`targetPolicy=explored_own_influence` 仅限制普通移动目标，复用 BeforeCityMove、清路、位置提交、起点放置、CityMoveCompleted 及事件链。当前该参数是已登记目标规则；尚未把所有移动规则转换为完整通用 CandidatePatch 订阅。
+- 雷蛇计谋：Lua 左侧支付 3 金券；右侧适配仅选目标并挂 `ReplaceInfluence`，不能再扣费。不能放置时保留已完成的移除。
+- 德克萨斯计谋：Lua 左侧支付 3 金券；右侧适配依次挂 `RemoveInfluence`、第一项 `MoveInfluence`、第二项 `MoveInfluence`，每步完成后才创建下一次交互。排除依据为第一次实际移动的 InfluenceId。
+- 锡人策略：`GainScore(1)` 后是两个独立可放弃 Condition，费用分别为 12、15 金券。拒绝左条件不创建支付或奖励子节点，也不阻止后一条件。
+- 城市样式宿主：激活先挂 Condition；费用数据仍来自现有目录。右侧内容节点才登记使用标记、锁角色、构造候选并发 `CityStyleSpecialActionActivated`。固定费用由基础支付节点承担；复合动力左侧由可持久化的组合支付节点承担。
+- `effect.resource.pay.choice` 是宿主组合支付节点：持久化可选资源组合，发 `effect.resource.payment_choice`，回答后重新校验全部余额并一次扣除；拒绝或余额不足时左侧失败，右侧不创建。暂未增加新的 Lua 公开构造器，不能据此宣称通用 Lua 资源分配 API 已全部完成。
+- 复合动力固定源石费用只读一次 `FixedCost`；材料组合恰好为 3 源岩/异铁。右侧 Lua 返回通用 MoveCity，版本化完成处理器在移动及事件完成后返回限定航道候选的 PlaceInfluence。
+- 高效移动先付 3 源石，再执行至多两个可放弃 MoveCity；第二次目标在第一次及其事件结算完后生成，不从激活时的候选数组预取。
+- Lua 编译器递归保留嵌套左右式，并将 `allowDecline`、决定玩家、提示键传入内核。continuation 只绑定显式指定的顶层源节点，不能复制到每个支付子节点。
+
+统一可选 Effect UI 使用 `action.decline_effect` 的 `continue` / `decline` 候选；接受后进入执行器，拒绝后节点 `Failed(player_declined)`。兼容旧存档的布尔放弃回答。已支付之后，右侧普通失败不会退款；只有未支付的左侧取消可以结束本次尝试而不消耗标记与主要行动预算。
+
+
+### 2026-09-20 卡面语义复核补充
+
+本轮修正实现以符合 2.6，不依据旧方法命名或旧测试反向改写卡面规则：
+
+- 德克萨斯策略通过 GainResource 子节点先提交 12 金券，再打开设施选择。供应区为空时保留金券；等待选择后恢复不重复发放。
+- 锡人计谋先通过通用 MoveCharacterCard 将全部弃牌回手，再逐项 Choice 分支 → GainResource / SelectInfluence；奖励次数由外部 Lua 根据执行前快照生成。
+- 坎诺特策略的数量弹窗允许全零确认，交互以显式零数量候选表示不出售；不是取消角色牌使用。出售结算现已改为通用 SellResource 原语，价格复用统一资源出售规则。
+- 动员配套体系由 Lua Choice 选择对手稳定 InfluenceId，continuation 创建 ReplaceInfluence；通用地图 renderer 复用高亮。不得把只移除等同于完整替换；无供应或对手城市阻止放置时才以 removed_only 完成。
+- MoveCity 未提供固定目标时，先完成 BeforeCityMove 响应，再生成候选和选择 UI；回答后复验目标，不重复触发 BeforeCityMove。本轮未宣称完整 CandidatePatch 参数链已完成。
+
+
+### 2026-09-20 外部定义落地
+
+2.2～2.5 的共同定义现采用 JSON 静态数据与独立 Lua 脚本：入口 `Assets/StreamingAssets/Content/core/pack.json`。角色十项能力全部由外部 Lua 组合，旧五项角色 executor 已移除；通过通用 Choice 分支、SellResource、MoveFacilityCard、MoveCharacterCard、SelectInfluence 补齐组合。角色牌 artwork 为包内 PNG/JPEG 相对路径，名称与能力引用也不再取自 Unity 序列化目录。
+
+设施、事件、城市样式静态定义也已外部化；设施和城市样式仍有宿主行为适配，不能等同于全效果纯 Lua。企业板、企业家能力牌与回合卡采用同一格式，但仅提供未启用模板，运行时玩法未接入。共同定义、各原语当前参数范围、恢复哈希和兼容边界见《外部内容包与Lua定义》。
+
+
+### 2026-09-20 定义元数据补充
+
+外部包 schemaVersion 升至 2。每项角色能力必须声明 skillType（normal/persistent/one_shot）；永续能力必须声明 hasSpecialZone，有区域时以 specialZoneId 引用本卡 playerMarkerZones。所有内容类型必须声明 expansionId 和 replaces（null 或同类目标的 expansionId/contentType/definitionId）。加载时拒绝无效类型、缺失选择、无效区域、自替换、跨类替换和包内循环。具体 JSON 示例及元数据与运行时生命周期的边界见《外部内容包与Lua定义》。现有设施仍为 46 份实体牌完整定义，对应 19 种名称/效果，尚未压缩成模板与实例分离结构。
+
+
+### 2026-09-20 内容装配与设施模板迁移
+
+现已执行 pack.enabledExpansionIds 和显式替换关系，保留原运行时槽位、仅注册最终有效能力、切换相应名称/数据/贴图；拒绝缺失依赖和多重替换冲突。设施从 46 份重复完整数据拆为 19 份共用模板与 46 份实体差异引用，展开后的数据不变。当前参数、路径、哈希和行为族边界见《外部内容包与Lua定义》的“内容装配与设施模板”。永续/一次性的具体生命周期遵照用户指示，待具体扩展卡牌实现再补。
+
+## 2026-09-20 设施 Lua 组合与接口补齐
+
+本轮五类设施转为外部 Lua 组合：资源出售使用 SellResource；替换或放置影响力使用 Choice 后执行 SelectInfluence/PlaceInfluence；任选五基本资源使用 ChooseResources；免费移动并放置航道影响力使用 MoveCity 完成事件后再挂 PlaceInfluence；核心相邻设施奖励使用公开设施快照统计后 GainResource。免费移动的影响力候选来自实际经过的航道，不能预选右侧目标或默认第一航道。
+
+新增 `Effect.ChooseResources({ player = ctx.playerId, amount = 5 })`：amount 为 1～99，选择源岩 Originium、源石 OriginiumShard、异铁 Iron，总量必须准确相等。请求使用 resource_allocation schema，候选带 total:N；UI 只收集数量。内核提交前与 executor 执行时均复验，非法回答保留原请求且不改变资源；有效回答后才挂 GainResource，恢复和重复提交不得重复发放。
+
+`Global.Content.FindInstances()` 当前提供已建设设施公开快照：id、definitionId、owner、slotIndex、adjacentToCore。它不开放 GameState 或 Unity 对象，也不代表所有内容区域查询已实现。Lua 只读取快照并返回 Effect，状态变更由内核执行，UI 继续复用现有数量弹窗和地图选择。
+
+正式组合根的各行动处理器共用包含同一效果注册表的 RoundExecutionService/RoundAdvanceService，避免独立服务跳过新回合主链。已迁移五类旧 facility behavior 分支撤下；该宿主版本升至 1.1.0，旧行为节点明确报版本不匹配，不能静默使用新规则续算。复制、额外建设、扩展枢纽等其余设施适配与旧 Pending 兼容入口仍存在，不能将本轮记为全部设施纯 Lua 化。
+
+永续、一次性生命周期按用户要求留待具体扩展牌实施。NMC-015 尚有其他内容适配、旧 Pending 调用、完整候选补丁链和发布级联机验收等未关闭项。
+
+## 2026-09-21 相邻设施入场复制迁移
+
+附属能源设施的相邻筛选与复制编排已改为 `lua/facilities/copy_adjacent_entry.lua`：读取公开设施快照，筛选己方十字相邻、非彩色且有入场效果的设施，再用 Choice 生成单次选择。无合法邻居时正常完成，未选中的分支不结算。复用原 facility.entry.choice 弹窗，不修改布局。
+
+新增 `Effect.ActivateFacilityEntry({ player = ctx.playerId, instanceId = '设施实例ID' })`。宿主复验实际实例仍存在、归属于执行玩家且具备入场效果，再挂现有设施入场节点；保存后从已挂子节点继续，不重复触发。它不包含相邻或颜色规则，这些限制属于卡牌 Lua。公开设施快照新增 color、hasEntryEffect，只读构造快照，不在查询时修改 GameState。
+
+原 ReplayAdjacentEntry 专用分支已撤下，设施入口宿主版本升至 1.2.0。旧版本未完成节点不能静默套用新代码恢复。其他旧设施适配仍在：额外建设、扩展枢纽、收尾标记，以及载具仓库等。
+
+本轮审查另发现载具仓库旧适配缺少“移除后调度”分支，探索选项也尚未完成合法候选交互。该问题已登记，当前未修复，不能把该设施记作完成。下一步应补齐通用探索交互后迁移完整 Choice 两分支，避免继续使用预选目的地和专用结算逻辑。NMC-015 仍不可结案。
+
+## 2026-09-21 基础设施后续迁移（当前状态）
+
+载具仓库、额外建设、延伸枢纽与联邦理事处已迁为 Lua 组合及通用原语。14 种入场模板全部脱离旧 facility_entry 适配，旧设施 Behavior 与城市样式 ScriptStep 已撤下。此前记录的载具仓库缺失分支现已修复。建设不再默认空位或错误扣行动次数；探索逐段选择路线、落点及收费方；起始玩家覆盖值在回合边界消费并清除。
+
+统一请求编号修复了同一 Effect 连续同类交互时 ID 重复的问题，设施展示也已接入统一路由。建设颜色折扣改为外部 costReductionPerDistinctBuiltColor 数据。接口、版本与剩余 UI 边界详见《基础内容迁移与UI接入边界》。NMC-015 仍不能结案，不把基础内容迁移等同旧 UI、存档和多人发布验收完成。

@@ -90,26 +90,31 @@ namespace YC.Tests.EditMode
             Assert.That(prefab.GetComponentInChildren<EventSystem>(true), Is.Null);
         }
 
-        [TestCase(PrefabPath)]
-        [TestCase(InfrastructurePath)]
-        public void EditorPrefab_HasNoMissingScripts(string path)
+        [Test]
+        public void EditorPrefab_HasNoMissingScripts()
         {
-            var contents = PrefabUtility.LoadPrefabContents(path);
-            try
-            {
-                var transforms = contents.GetComponentsInChildren<Transform>(true);
-                for (var i = 0; i < transforms.Length; i++)
+            EditModeTestCaseRunner.Run(
+                new[] { PrefabPath, InfrastructurePath },
+                path =>
                 {
-                    Assert.That(
-                        GameObjectUtility.GetMonoBehavioursWithMissingScriptCount(transforms[i].gameObject),
-                        Is.EqualTo(0),
-                        transforms[i].GetHierarchyPath());
-                }
-            }
-            finally
-            {
-                PrefabUtility.UnloadPrefabContents(contents);
-            }
+                    var contents = PrefabUtility.LoadPrefabContents(path);
+                    try
+                    {
+                        var transforms = contents.GetComponentsInChildren<Transform>(true);
+                        for (var i = 0; i < transforms.Length; i++)
+                        {
+                            Assert.That(
+                                GameObjectUtility.GetMonoBehavioursWithMissingScriptCount(transforms[i].gameObject),
+                                Is.EqualTo(0),
+                                path + ": " + transforms[i].GetHierarchyPath());
+                        }
+                    }
+                    finally
+                    {
+                        PrefabUtility.UnloadPrefabContents(contents);
+                    }
+                },
+                path => path);
         }
 
         [Test]
@@ -168,15 +173,17 @@ namespace YC.Tests.EditMode
         }
 
         [Test]
-        public void ProductionPresentation_CreatesOnlyFiveApprovedDynamicGameObjects()
+        public void ProductionPresentation_CreatesOnlyApprovedDynamicGameObjects()
         {
             var presentationRoot = Path.Combine(UnityEngine.Application.dataPath, "YC/Presentation");
             var sourcePaths = Directory.GetFiles(presentationRoot, "*.cs", SearchOption.AllDirectories);
             var expectedCounts = new System.Collections.Generic.Dictionary<string, int>(StringComparer.Ordinal)
             {
-                { "CardPointerInteraction.cs", 2 },
+                { "CardPointerInteraction.cs", 3 }, // 拖动根、标签及无输入组件的组成员锚点。
                 { "FontHealthCheckRunner.cs", 2 },
-                { "GameLaunchContext.cs", 1 }
+                { "GameLaunchContext.cs", 1 },
+                { "InfluenceModelUiCamera.cs", 2 }, // 模型展示相机与补光，不生成固定 UI。
+                { "PlayerJourneyRuntime.cs", 1 } // 受编译条件及启动参数约束的黑盒输入宿主。
             };
             var actualCounts = new System.Collections.Generic.Dictionary<string, int>(StringComparer.Ordinal);
             var total = 0;
@@ -201,7 +208,7 @@ namespace YC.Tests.EditMode
                 total += count;
             }
 
-            Assert.That(total, Is.EqualTo(5), "生产 Presentation 的动态 GameObject 构造总数发生漂移。");
+            Assert.That(total, Is.EqualTo(9), "生产 Presentation 的动态 GameObject 构造总数发生漂移。");
             Assert.That(actualCounts, Is.EquivalentTo(expectedCounts));
         }
 

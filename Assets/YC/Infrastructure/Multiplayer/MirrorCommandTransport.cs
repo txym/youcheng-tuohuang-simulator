@@ -6,6 +6,7 @@ using YC.Application.Sessions;
 using YC.Domain.Commands;
 using YC.Domain.Events;
 using YC.Domain.Rules;
+using YC.Domain.State;
 
 namespace YC.Infrastructure.Multiplayer
 {
@@ -32,8 +33,8 @@ namespace YC.Infrastructure.Multiplayer
         private int localPlayerId;
         private IList<PlayerSeat> launchSeats;
 
-        public event Action<ConfirmedGameCommandDto> ConfirmedCommandApplied;
-        public event Action<InitialGameStateDto> InitialStateApplied;
+        public event Action<ConfirmedGameStateViewDto> ConfirmedStateViewApplied;
+        public event Action<InitialGameStateViewDto> InitialStateViewApplied;
         public event Action<RejectedGameCommandDto> CommandRejected;
         public static MirrorCommandTransport Instance { get; private set; }
 
@@ -265,17 +266,34 @@ namespace YC.Infrastructure.Multiplayer
             MarkGameStateSynchronized(message.PlayerId, true);
         }
 
-        private void SendInitialState(NetworkConnectionToClient connection) =>
-            connection.Send(new InitialStateMessage { Json = JsonUtility.ToJson(dispatcher.CreateInitialStateSynchronization()) });
+        private void SendInitialState(NetworkConnectionToClient connection)
+        {
+            int playerId;
+            if (!bindings.TryGetPlayer(connection.connectionId, out playerId)) return;
+            InitialGameStateViewDto view = dispatcher.CreateInitialStateViewSynchronization(playerId);
+            connection.Send(new InitialStateMessage { Json = JsonUtility.ToJson(view) });
+        }
 
         private void BroadcastAccepted(ConfirmedGameCommandDto confirmed)
         {
-            var message = new AcceptedCommandMessage { Json = JsonUtility.ToJson(confirmed) };
             foreach (var connection in NetworkServer.connections.Values)
             {
-                if (!(connection is LocalConnectionToClient)) connection.Send(message, Channels.Reliable);
+                if (connection is LocalConnectionToClient) continue;
+                int playerId;
+                if (!bindings.TryGetPlayer(connection.connectionId, out playerId)) continue;
+                // 每个连接单独投影；绝不先序列化 confirmed.State 再由客户端隐藏。
+                ConfirmedGameStateViewDto view = dispatcher.CreateConfirmedStateViewSynchronization(
+                    confirmed,
+                    GameStateViewer.Player(playerId));
+                connection.Send(
+                    new AcceptedCommandMessage { Json = JsonUtility.ToJson(view) },
+                    Channels.Reliable);
             }
-            ConfirmedCommandApplied?.Invoke(confirmed);
+            if (confirmed != null)
+            {
+                ConfirmedStateViewApplied?.Invoke(
+                    dispatcher.CreateConfirmedStateViewSynchronization(confirmed, GameStateViewer.Host));
+            }
         }
 
         private void SendRejected(ulong recipient, RejectedGameCommandDto rejected)
@@ -287,8 +305,8 @@ namespace YC.Infrastructure.Multiplayer
         private void OnInitialState(InitialStateMessage message)
         {
             if (NetworkServer.active) return;
-            var snapshot = JsonUtility.FromJson<InitialGameStateDto>(message.Json);
-            var result = dispatcher.ApplyInitialStateSynchronization(snapshot);
+            var snapshot = JsonUtility.FromJson<InitialGameStateViewDto>(message.Json);
+            var result = dispatcher.ApplyInitialStateViewSynchronization(snapshot);
             if (result.Succeeded)
             {
                 awaitingInitialState = false;
@@ -296,20 +314,20 @@ namespace YC.Infrastructure.Multiplayer
                 MarkGameStateSynchronized(localPlayerId, true);
                 if (NetworkClient.isConnected)
                     NetworkClient.Send(new InitialStateAppliedMessage { PlayerId = localPlayerId });
-                InitialStateApplied?.Invoke(snapshot);
+                InitialStateViewApplied?.Invoke(snapshot);
             }
         }
 
         private void OnAccepted(AcceptedCommandMessage message)
         {
             if (NetworkServer.active) return;
-            var confirmed = JsonUtility.FromJson<ConfirmedGameCommandDto>(message.Json);
-            var result = dispatcher.ApplyConfirmedCommand(confirmed);
+            var confirmed = JsonUtility.FromJson<ConfirmedGameStateViewDto>(message.Json);
+            var result = dispatcher.ApplyConfirmedStateViewSynchronization(confirmed);
             if (result.Succeeded)
             {
                 if (confirmed.Command != null && confirmed.Command.CommandId == pendingCommandId)
                     pendingCommandId = null;
-                ConfirmedCommandApplied?.Invoke(confirmed);
+                ConfirmedStateViewApplied?.Invoke(confirmed);
             }
             else
             {

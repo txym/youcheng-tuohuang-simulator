@@ -298,12 +298,12 @@ namespace YC.Tests.EditMode
             var prompt = promptType.GetMethod("Bind", BindingFlags.Static | BindingFlags.Public)
                 .Invoke(null, new object[] { promptView });
             promptType.GetMethod("SetPrompt", BindingFlags.Instance | BindingFlags.Public)
-                .Invoke(prompt, new object[] { "交互 HUD 提示更新" });
+                .Invoke(prompt, new object[] { "交互 HUD 提示更新", null });
             Assert.That(GetProperty<Text>(promptView, "PromptText").text, Is.EqualTo("交互 HUD 提示更新"));
             Assert.That(GetPrivateField<float>(prompt, "targetAlpha"), Is.EqualTo(1f));
             Assert.That(GetPrivateField<float>(prompt, "targetX"), Is.EqualTo(0f));
             promptType.GetMethod("SetPrompt", BindingFlags.Instance | BindingFlags.Public)
-                .Invoke(prompt, new object[] { string.Empty });
+                .Invoke(prompt, new object[] { string.Empty, null });
             Assert.That(GetPrivateField<float>(prompt, "targetAlpha"), Is.EqualTo(0f));
         }
 

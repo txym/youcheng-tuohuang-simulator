@@ -6,7 +6,6 @@ using YC.Domain.CardFlows;
 using YC.Domain.Cards;
 using YC.Domain.Commands;
 using YC.Domain.Exploration;
-using YC.Domain.Facilities;
 using YC.Domain.Harvest;
 using YC.Domain.Influence;
 using YC.Domain.Maps;
@@ -64,8 +63,7 @@ namespace YC.Presentation
         private CharacterCardCoverDragCoordinator characterCardCoverDrag;
         private int lastPresentedGameLogSequence;
         private BuildFacilityInteractionUiCoordinator buildFacilityInteraction;
-        private FacilityEffectChoiceDialog facilityEffectChoiceDialog;
-        private FacilityEffectInteractionUiCoordinator facilityEffectInteraction;
+        private FacilityInteractionUiCoordinator facilityInteraction;
         private SpecialActionInteractionUiCoordinator specialActionInteraction;
 
         public GameState CurrentState => session == null ? null : session.State;
@@ -214,21 +212,15 @@ namespace YC.Presentation
             RefreshResourceCounter(false);
             EnsureSettingsMenu();
             ShowInitialPlacementChoices();
-            facilityEffectChoiceDialog = new FacilityEffectChoiceDialog(
-                gameplayInteractionHud.DialogRegistry,
-                GetUiCanvasTransform());
-            facilityEffectInteraction = new FacilityEffectInteractionUiCoordinator(
+            facilityInteraction = new FacilityInteractionUiCoordinator(
                 () => session == null ? null : session.State,
                 () => localPlayerId,
-                mapQuery,
-                facilityEffectChoiceDialog,
+                GetUiCanvasTransform,
+                gameplayInteractionHud.DialogRegistry,
                 highlights => workflowView.SetHighlights(highlights),
                 () => workflowView.ClearHighlights(),
-                (pending, optionId) => turnActionPresenter.BeginAdditionalExploreAction(pending, optionId),
-                () => turnActionPresenter.CancelAdditionalExploreAction(),
                 SubmitPendingEffectCommand,
                 SetPrompt);
-            facilityEffectInteraction.ConfigureAdditionalBuildDraftView(workflowView.ShowBuildFacilityDraft, workflowView.HideBuildFacilityDraft);
             specialActionInteraction = new SpecialActionInteractionUiCoordinator(
                 () => session == null ? null : session.State,
                 () => localPlayerId,
@@ -240,9 +232,10 @@ namespace YC.Presentation
                 () => workflowView.ClearHighlights(),
                 SubmitPendingEffectCommand,
                 SetPrompt);
+            BuildEventCardInteraction();
             buildFacilityInteraction?.Dispose();
             buildFacilityInteraction = new BuildFacilityInteractionUiCoordinator(
-                buildInfoPanel, turnActionPresenter, facilityEffectInteraction);
+                buildInfoPanel, turnActionPresenter);
             buildFacilityInteraction.Refresh(session.State, localPlayerId);
             characterMapInteraction = new CharacterMapInteractionCoordinator(
                 () => session == null ? null : session.State,
@@ -302,7 +295,7 @@ namespace YC.Presentation
                 DisposeCharacterCardEffectInteraction();
                 characterMapInteraction?.Cancel();
                 specialActionInteraction?.Dispose();
-                facilityEffectInteraction?.Dispose();
+                facilityInteraction?.Dispose();
             }
 
             flowCoordinator?.ResetToHidden();
@@ -310,7 +303,7 @@ namespace YC.Presentation
             characterCardEffectInteraction = null;
             characterMapInteraction = null;
             specialActionInteraction = null;
-            facilityEffectInteraction = null;
+            facilityInteraction = null;
 
             if (buildInfoPanel != null)
             {
@@ -354,7 +347,7 @@ namespace YC.Presentation
             RefreshActionPanel();
             RefreshRoundTrackerFromState();
 
-            if (facilityEffectInteraction != null && facilityEffectInteraction.Synchronize())
+            if (facilityInteraction != null && facilityInteraction.Synchronize())
             {
                 SetPrompt("请先结算设施入场效果。");
                 return;
@@ -460,6 +453,7 @@ namespace YC.Presentation
 
         private void HideEventCardOptions()
         {
+            ClearEventCardInteraction();
             if (explorationEventPresenter != null)
             {
                 explorationEventPresenter.Cancel();
@@ -499,6 +493,7 @@ namespace YC.Presentation
         private void BuildInteractionRouting()
         {
             interactionRouter = new InteractionRouter(SetPrompt);
+            RegisterEventCardInteraction();
             interactionRouter.Register(new SpecialActionInteractionAdapter(specialActionInteraction));
             characterCardInteraction = new CharacterCardInteraction(
                 characterCardEffectInteraction,
@@ -507,7 +502,7 @@ namespace YC.Presentation
                 () => buildInfoPanel != null && buildInfoPanel.IsFacilityEffectSelectionActive,
                 TryCancelCharacterFacilityEffectSelection);
             interactionRouter.Register(characterCardInteraction);
-            interactionRouter.Register(new FacilityEffectInteractionAdapter(facilityEffectInteraction));
+            interactionRouter.Register(new FacilityInteractionAdapter(facilityInteraction));
             interactionRouter.Register(turnActionPresenter.BuildInteraction);
             interactionRouter.Register(turnActionPresenter.MoveInteraction);
             interactionRouter.Register(turnActionPresenter.DeployInteraction);
@@ -601,6 +596,11 @@ namespace YC.Presentation
 
         private void RefreshPendingChoiceOrHighlights()
         {
+            if (SynchronizeEventCardInteraction())
+            {
+                return;
+            }
+
             if (session.State.Phase != GamePhase.ResourceCollection)
             {
                 ClearCollectionSelection();
@@ -722,6 +722,11 @@ namespace YC.Presentation
                 return;
             }
 
+            if (SynchronizeEventCardInteraction())
+            {
+                return;
+            }
+
             if (characterSettlementInProgress &&
                 characterView != null &&
                 characterView.IsSecondEffectExecution)
@@ -732,13 +737,6 @@ namespace YC.Presentation
             var state = session == null ? null : session.State;
             if (state != null && state.HasPendingChoice())
             {
-                if (state.PendingCardSession != null &&
-                    state.PendingCardSession.IsValid() &&
-                    state.PendingCardSession.ScenarioId == FacilityPendingChoiceTypes.ScenarioId)
-                {
-                    return;
-                }
-
                 var pendingChoice = CardFlowStateAdapter.GetPendingChoiceView(state);
                 if (pendingChoice != null &&
                     pendingChoice.PlayerId == localPlayerId &&
@@ -801,7 +799,8 @@ namespace YC.Presentation
                     AfterRejectedPrompt = _ =>
                     {
                         specialActionInteraction?.Synchronize();
-                        facilityEffectInteraction?.Synchronize();
+                        facilityInteraction?.Synchronize();
+                        SynchronizeEventCardInteraction();
                     },
                     OnAppliedLocally = _ =>
                     {
@@ -812,6 +811,7 @@ namespace YC.Presentation
             if (outcome.Kind == SubmitOutcomeKind.NoResult)
             {
                 interactionRouter?.NotifyCommandSettled(commandId);
+                SynchronizeEventCardInteraction();
             }
         }
 
@@ -989,7 +989,7 @@ namespace YC.Presentation
         private void ApplyDebugHotspotHighlights() =>
             mapView.ApplyDebugHotspotHighlights(debugClicks);
 
-        private void SetPrompt(string message) => promptPresenter?.SetPrompt(message);
+        private void SetPrompt(string message) => promptPresenter?.SetPrompt(message, interactionRouter?.GetPendingPrompt());
 
         private void UpdatePromptAnimation()
         {

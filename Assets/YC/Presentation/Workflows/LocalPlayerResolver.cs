@@ -17,14 +17,14 @@ namespace YC.Presentation.Workflows
             int configuredLocalPlayerId,
             bool controlsCurrentPlayerLocally)
         {
-            if (!controlsCurrentPlayerLocally || state == null || state.CurrentPlayerId <= 0)
+            if (!controlsCurrentPlayerLocally || state == null)
             {
                 return configuredLocalPlayerId;
             }
 
             if (state.Phase != GamePhase.ResourceCollection)
             {
-                return state.CurrentPlayerId;
+                return state.CurrentPlayerId > 0 ? state.CurrentPlayerId : configuredLocalPlayerId;
             }
 
             var order = turnOrderService.GetTurnOrder(state);

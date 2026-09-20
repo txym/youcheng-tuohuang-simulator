@@ -15,7 +15,8 @@ namespace YC.Editor
     public static class EventChoiceDialogLayoutBuildReadiness
     {
         internal const string EventChoiceDialogSourceSha256 =
-            "E3B04E45758BF51A675DF1D210FFFA153E48B9139B09D9A6025314B8880272D1";
+            // 仅新增实际可见选项的玩家自动化标识，未改布局与 Transform 合同。
+            "1B3CA324E364FC2500779D44C4C70217ADCD282A6B6023AC5813925B20382299";
         internal const string EventChoiceDialogViewSourceSha256 =
             "7391E322A2476C6DB51A0BCBD785E6D27F464624019DDE507193540BC15A7E78";
 

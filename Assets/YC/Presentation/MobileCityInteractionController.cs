@@ -693,7 +693,8 @@ namespace YC.Presentation
                 gameplayInteractionHud.DialogRegistry.CardVisualCatalog,
                 OnUseCharacterActionClicked,
                 OnDeclareCityStyleClicked,
-                BeginDeployAction, BeginDispatchAction, BeginExploreAction, BeginMoveAction, EndCurrentAction);
+                BeginDeployAction, BeginDispatchAction, BeginExploreAction, BeginMoveAction,
+                EndCurrentAction, OnBuildActionClicked);
             if (promptPresenter == null || actionPanel == null) { Debug.LogError("[MobileCityInteractionController] 交互 HUD 行为绑定失败。", this); return false; }
             characterHandPanel = gameplayInteractionHud.CharacterHandPanel;
             characterCardCoverDrag = new CharacterCardCoverDragCoordinator(
@@ -729,7 +730,12 @@ namespace YC.Presentation
             var characterView = characterCardPresenter == null
                 ? null
                 : characterCardPresenter.BuildView(session.State, localPlayerId);
-            actionPanel.Render(turnActionPresenter.BuildActionPanelViewModel());
+            var actionViewModel = turnActionPresenter.BuildActionPanelViewModel();
+            actionPanel.Render(actionViewModel);
+            gameplayInteractionHud.Frame.Refresh(session.State, actionViewModel,
+                turnActionPresenter.ActionPanelPresenter.GetUnavailableEndActionPrompt());
+            gameplayInteractionHud.MainModules.Render(session.State, session.View, localPlayerId,
+                gameplayInteractionHud.DialogRegistry.CardVisualCatalog);
             if (actionPanel.CurrentFace == ActionPanelFace.Character && characterView != null) actionPanel.ShowCharacterCard(characterView);
             if (characterView != null && characterView.IsSecondEffectDecision)
             {

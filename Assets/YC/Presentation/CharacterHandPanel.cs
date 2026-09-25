@@ -38,6 +38,12 @@ namespace YC.Presentation
 
         [SerializeField] private CharacterHandPanelView view;
         [SerializeField] private CharacterHandLayoutProfile layoutProfile;
+        [Header("主界面超量手牌导航")]
+        [SerializeField] private Button handPreviousButton;
+        [SerializeField] private Button handNextButton;
+        [SerializeField] private Text handPageText;
+        [SerializeField] private int handPageSize = 5;
+        [SerializeField] private string handPageFormat = "{0} / {1}";
 
         private readonly Dictionary<int, List<string>> preferredOrders =
             new Dictionary<int, List<string>>();
@@ -69,6 +75,7 @@ namespace YC.Presentation
         private int currentPlayerId;
         private List<string> dragInitialPreferredOrder;
         private bool initialized;
+        private int handPageStart;
 
         public CharacterHandPanelView View => view;
         public CharacterHandLayoutProfile LayoutProfile => layoutProfile;
@@ -98,6 +105,8 @@ namespace YC.Presentation
 
             view.DiscardButton.onClick.RemoveListener(OpenDiscardPreview);
             view.DiscardCloseButton.onClick.RemoveListener(CloseDiscardPreview);
+            if (handPreviousButton != null) handPreviousButton.onClick.RemoveListener(PreviousHandPage);
+            if (handNextButton != null) handNextButton.onClick.RemoveListener(NextHandPage);
             CompleteHandCountLayoutAnimation();
             DestroyDragGhost();
         }
@@ -145,6 +154,16 @@ namespace YC.Presentation
             view.DiscardCloseButton.onClick.RemoveListener(CloseDiscardPreview);
             view.DiscardCloseButton.onClick.AddListener(CloseDiscardPreview);
             view.DiscardCloseInputHandler.Configure(CloseDiscardPreview);
+            if (handPreviousButton != null)
+            {
+                handPreviousButton.onClick.RemoveListener(PreviousHandPage);
+                handPreviousButton.onClick.AddListener(PreviousHandPage);
+            }
+            if (handNextButton != null)
+            {
+                handNextButton.onClick.RemoveListener(NextHandPage);
+                handNextButton.onClick.AddListener(NextHandPage);
+            }
             view.DiscardOverlayObject.SetActive(false);
             view.DiscardCountText.text = "0";
             initialized = true;
@@ -189,6 +208,7 @@ namespace YC.Presentation
                              currentViewModel != null && currentViewModel.CanCover;
             CompleteHandCountLayoutAnimation();
             var previousPlayerId = currentPlayerId;
+            if (previousPlayerId != playerId) handPageStart = 0;
             var previousLayout = CaptureHandLayout();
             CancelActiveDrag();
             pendingCoverCardId = string.Empty;
@@ -242,9 +262,15 @@ namespace YC.Presentation
 
             RebuildDiscardPreview();
             view.DiscardCloseInputHandler.Configure(CloseDiscardPreview);
+            GameplayHudFrame.Active?.ConstrainExternalPage(
+                view.DiscardOverlayObject.transform as RectTransform);
             view.DiscardOverlayObject.SetActive(true);
             view.DiscardOverlayObject.transform.SetAsLastSibling();
+            GameplayHudFrame.Active?.ShowPage(view.DiscardOverlayObject, false);
         }
+
+        public bool OwnsDiscardPage(GameObject page) =>
+            view != null && view.DiscardOverlayObject == page;
 
         public void CloseDiscardPreview()
         {
@@ -254,6 +280,7 @@ namespace YC.Presentation
             }
 
             view.DiscardOverlayObject.SetActive(false);
+            GameplayHudFrame.Active?.HidePage(view.DiscardOverlayObject);
             ClearChildren(view.OverlayHandContent);
             ClearChildren(view.OverlayDiscardContent);
         }
@@ -641,11 +668,37 @@ namespace YC.Presentation
         {
             var expanded = currentViewModel != null && currentViewModel.CanCover;
             var count = handEntries.Count;
-            var visibleCount = count;
+            var pageSize = Mathf.Max(1, handPageSize);
+            handPageStart = Mathf.Clamp(handPageStart, 0,
+                Mathf.Max(0, ((count - 1) / pageSize) * pageSize));
+            var pageEnd = Mathf.Min(count, handPageStart + pageSize);
+            var visibleCount = pageEnd - handPageStart;
             if (!string.IsNullOrEmpty(pendingCoverCardId) &&
-                FindEntry(pendingCoverCardId) != null)
+                FindEntry(pendingCoverCardId) != null &&
+                handEntries.FindIndex(entry => entry.Model.CardId == pendingCoverCardId)
+                    >= handPageStart &&
+                handEntries.FindIndex(entry => entry.Model.CardId == pendingCoverCardId)
+                    < pageEnd)
             {
                 visibleCount--;
+            }
+
+            var paged = count > pageSize;
+            if (handPreviousButton != null)
+            {
+                handPreviousButton.gameObject.SetActive(paged);
+                handPreviousButton.interactable = handPageStart > 0;
+            }
+            if (handNextButton != null)
+            {
+                handNextButton.gameObject.SetActive(paged);
+                handNextButton.interactable = pageEnd < count;
+            }
+            if (handPageText != null)
+            {
+                handPageText.gameObject.SetActive(paged);
+                if (paged) handPageText.text = string.Format(handPageFormat,
+                    handPageStart / pageSize + 1, (count + pageSize - 1) / pageSize);
             }
 
             var visibleIndex = 0;
@@ -653,6 +706,15 @@ namespace YC.Presentation
             {
                 var entry = handEntries[i];
                 var rect = entry.View.Root;
+                var onPage = i >= handPageStart && i < pageEnd;
+                if (!onPage)
+                {
+                    entry.View.CanvasGroup.alpha = 0f;
+                    entry.View.CanvasGroup.blocksRaycasts = false;
+                    entry.View.Button.interactable = false;
+                    continue;
+                }
+                entry.View.Button.interactable = entry.View.Image.texture != null;
                 rect.anchorMin = Vector2.right * 0.5f;
                 rect.anchorMax = rect.anchorMin;
                 rect.pivot = Vector2.one * 0.5f;
@@ -702,6 +764,18 @@ namespace YC.Presentation
                 var hovered = FindEntry(hoveredCardId);
                 hovered?.View.Root.SetAsLastSibling();
             }
+        }
+
+        private void PreviousHandPage()
+        {
+            handPageStart = Mathf.Max(0, handPageStart - Mathf.Max(1, handPageSize));
+            ApplyHandLayout();
+        }
+
+        private void NextHandPage()
+        {
+            handPageStart += Mathf.Max(1, handPageSize);
+            ApplyHandLayout();
         }
 
         private HandLayoutSnapshot CaptureHandLayout()

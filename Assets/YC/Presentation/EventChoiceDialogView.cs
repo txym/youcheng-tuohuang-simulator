@@ -205,7 +205,7 @@ namespace YC.Presentation
                 expandedContent == null || titleText == null || metadataText == null || descriptionText == null ||
                 collapsedSummaryText == null || actionArea == null || closeButton == null ||
                 closeButtonLabel == null || collapseButton == null || collapseButtonLabel == null ||
-                collapseButtonIcon == null || collapsiblePanel == null || dragHandle == null ||
+                collapseButtonIcon == null || collapsiblePanel == null ||
                 closeInputHandler == null || layoutProfile == null)
             {
                 reason = "事件选择窗口固定壳引用不完整。";
@@ -277,7 +277,7 @@ namespace YC.Presentation
             panel.sizeDelta = panelSize;
             panel.anchoredPosition = panelPosition;
             overlayCanvas.overrideSorting = true;
-            overlayCanvas.sortingOrder = 118;
+            overlayCanvas.sortingOrder = GameplayUiLayers.Page;
             overlayImage.color = new Color(0f, 0f, 0f, layoutProfile.OverlayAlpha);
             overlayImage.raycastTarget = GetOverlayRaycastTarget(mode);
             ConfigureModeFixedPresentation(mode);
@@ -344,7 +344,7 @@ namespace YC.Presentation
             closeButton.gameObject.SetActive(false);
             collapseButton.gameObject.SetActive(false);
             expandedContent.gameObject.SetActive(true);
-            dragHandle.enabled = false;
+            if (dragHandle != null) dragHandle.enabled = false;
             collapsiblePanel.Configure(null);
             eventCardArtworkImage.texture = null;
             eventCardArtworkImage.gameObject.SetActive(false);

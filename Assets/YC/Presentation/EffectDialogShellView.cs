@@ -54,7 +54,7 @@ namespace YC.Presentation
             if (layoutProfile == null ||
                 !layoutProfile.TryValidateConfiguration(out reason) ||
                 overlayCanvas == null || overlayImage == null || panel == null || expandedContent == null ||
-                titleText == null || descriptionText == null || dragHandle == null ||
+                titleText == null || descriptionText == null ||
                 collapsedSummaryText == null || collapseButton == null || collapseButtonText == null ||
                 collapseButtonIcon == null || collapsiblePanel == null || optionScroll == null ||
                 optionContent == null || optionRowTemplate == null || resourceRowTemplate == null ||
@@ -103,8 +103,7 @@ namespace YC.Presentation
             expandedContent.gameObject.SetActive(true);
             titleText.gameObject.SetActive(true);
             descriptionText.gameObject.SetActive(true);
-            dragHandle.enabled = true;
-            dragHandle.Configure(panel);
+            if (dragHandle != null) dragHandle.enabled = false;
             collapsedSummaryText.gameObject.SetActive(false);
             collapseButton.gameObject.SetActive(false);
             collapseButton.onClick.RemoveAllListeners();
@@ -147,8 +146,7 @@ namespace YC.Presentation
                 descriptionLayout.SizeDelta.x,
                 descriptionHeight);
             descriptionLayout.ApplyTo(descriptionText.rectTransform);
-            dragHandle.enabled = enableDrag;
-            dragHandle.Configure(panel);
+            if (dragHandle != null) dragHandle.enabled = false;
         }
 
         public RectTransform ConfigureOptionScroll(string objectName, float bottom, float top)

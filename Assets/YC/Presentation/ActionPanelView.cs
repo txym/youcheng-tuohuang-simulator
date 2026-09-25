@@ -41,6 +41,8 @@ namespace YC.Presentation
         [SerializeField] private Button dispatchButton;
         [SerializeField] private Button exploreButton;
         [SerializeField] private Button moveCityButton;
+        [SerializeField] private Button buildButton;
+        [SerializeField] private Button specialButton;
         [SerializeField] private Button endRoundButton;
 
         public GameObject PanelObject => panelObject;
@@ -73,6 +75,8 @@ namespace YC.Presentation
         public Button DispatchButton => dispatchButton;
         public Button ExploreButton => exploreButton;
         public Button MoveCityButton => moveCityButton;
+        public Button BuildButton => buildButton;
+        public Button SpecialButton => specialButton;
         public Button EndRoundButton => endRoundButton;
 
         public bool TryValidateConfiguration(out string reason)

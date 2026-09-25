@@ -41,6 +41,8 @@ namespace YC.Presentation
         private Vector2 expandedPanelPosition;
 
         public bool IsOpen => initialized && view.RootObject.activeSelf;
+
+        public bool OwnsPage(GameObject page) => view != null && view.RootObject == page;
         public float Zoom => zoom;
         public int PageIndex => pageIndex;
         public bool IsCollapsed => collapsed;
@@ -208,7 +210,10 @@ namespace YC.Presentation
                 return;
             }
 
+            GameplayHudFrame.Active?.SuspendEffectForInformation();
+            GameplayHudFrame.Active?.ConstrainExternalPage(view.RootObject.transform as RectTransform);
             view.RootObject.SetActive(true);
+            GameplayHudFrame.Active?.ShowPage(view.RootObject, false);
             ShowPage(initialPage);
         }
 
@@ -288,6 +293,7 @@ namespace YC.Presentation
             if (initialized)
             {
                 view.RootObject.SetActive(false);
+                GameplayHudFrame.Active?.HidePage(view.RootObject);
             }
         }
 

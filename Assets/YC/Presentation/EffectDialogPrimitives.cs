@@ -97,7 +97,7 @@ namespace YC.Presentation
     internal sealed class EffectDialogShell
     {
         // 游戏内效果弹窗统一位于设置/日志按钮（120）之下、其余常驻游戏 UI 之上。
-        internal const int SortingOrder = 119;
+        internal const int SortingOrder = GameplayUiLayers.Page;
 
         private readonly GameplayDialogRegistry registry;
         private EffectDialogShellView view;
@@ -203,7 +203,7 @@ namespace YC.Presentation
                 view.CollapsedSummaryText.rectTransform);
             view.CollapsedSummaryText.gameObject.SetActive(false);
             view.CollapseButton.gameObject.SetActive(true);
-            view.DragHandle.enabled = false;
+            if (view.DragHandle != null) view.DragHandle.enabled = false;
             view.CollapsiblePanel.Configure(new EffectDialogCollapseSpec(view.LayoutProfile)
             {
                 Panel = view.Panel,

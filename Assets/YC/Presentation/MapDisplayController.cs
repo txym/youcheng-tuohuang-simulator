@@ -22,6 +22,8 @@ namespace YC.Presentation
         [SerializeField, Range(1f, 179f)] private float fieldOfView = 45f;
         [SerializeField, Min(1f)] private float cameraPadding = 1.03f;
         [SerializeField] private Rect tabletopViewport = new Rect(0.02865f, 0f, 0.78385f, 1f);
+        [SerializeField] private Rect cameraViewport = new Rect(0f, 0f, 1f, 1f);
+        [SerializeField, Range(1f, 1.5f)] private float framedViewportZoom = 1.2f;
 
         [Header("Navigation")]
         [SerializeField, Range(0.1f, 1f)] private float minZoom = 0.9f;
@@ -84,7 +86,8 @@ namespace YC.Presentation
 
         private void Update()
         {
-            if (!UnityEngine.Application.isPlaying || !hasCameraLayout || targetCamera == null)
+            if (!UnityEngine.Application.isPlaying || !hasCameraLayout ||
+                targetCamera == null || !targetCamera.enabled)
             {
                 return;
             }
@@ -103,6 +106,15 @@ namespace YC.Presentation
 
         public void FitCameraToMap()
         {
+            FitCameraToMap(false);
+        }
+
+        private void FitCameraToMap(bool preserveNavigation)
+        {
+            var previousFocus = focusPoint;
+            var previousZoom = currentZoom;
+            var previousTargetZoom = targetZoom;
+            preserveNavigation &= hasCameraLayout;
             ResolveReferences();
             ApplyThemeBackground();
 
@@ -130,7 +142,7 @@ namespace YC.Presentation
 
             targetCamera.orthographic = false;
             targetCamera.fieldOfView = fieldOfView;
-            targetCamera.rect = new Rect(0f, 0f, 1f, 1f);
+            targetCamera.rect = cameraViewport;
             var aspect = targetCamera.aspect > 0f ? targetCamera.aspect : DefaultAspect;
             var safeAspect = aspect * tabletopViewport.width / tabletopViewport.height;
             baseDistance = MapCameraGeometry.CalculatePerspectiveFitDistance(
@@ -142,8 +154,10 @@ namespace YC.Presentation
                 cameraPadding,
                 targetCamera.nearClipPlane);
 
-            currentZoom = 1f;
-            targetZoom = 1f;
+            currentZoom = preserveNavigation
+                ? Mathf.Clamp(previousZoom, minZoom, maxZoom)
+                : cameraViewport.width < .99f ? framedViewportZoom : 1f;
+            targetZoom = currentZoom;
             zoomVelocity = 0f;
             hasZoomAnchor = false;
             EndDrag();
@@ -171,7 +185,36 @@ namespace YC.Presentation
             {
                 hasCameraLayout = false;
                 Debug.LogError("[MapDisplayController] 桌面导航边界配置失败：" + reason, this);
+                return;
             }
+
+            if (preserveNavigation)
+            {
+                currentZoom = Mathf.Clamp(previousZoom, minZoom, maxZoom);
+                targetZoom = Mathf.Clamp(previousTargetZoom, minZoom, maxZoom);
+                focusPoint = MapCameraGeometry.ClampPlanarPosition(
+                    previousFocus, panOrigin, panAxisX, panAxisY, GetCurrentPanBounds());
+                ApplyCameraTransform();
+            }
+        }
+
+        public void SetScreenViewport(Rect viewport)
+        {
+            viewport = Rect.MinMaxRect(
+                Mathf.Clamp01(viewport.xMin), Mathf.Clamp01(viewport.yMin),
+                Mathf.Clamp01(viewport.xMax), Mathf.Clamp01(viewport.yMax));
+            if (viewport.width <= 0f || viewport.height <= 0f)
+            {
+                EndDrag();
+                hasZoomAnchor = false;
+                if (targetCamera != null) targetCamera.enabled = false;
+                return;
+            }
+            if (targetCamera != null) targetCamera.enabled = true;
+            if (cameraViewport == viewport && tabletopViewport == new Rect(0f, 0f, 1f, 1f)) return;
+            cameraViewport = viewport;
+            tabletopViewport = new Rect(0f, 0f, 1f, 1f);
+            FitCameraToMap(true);
         }
 
         private void ResolveReferences()
@@ -256,6 +299,7 @@ namespace YC.Presentation
             }
 
             if (Input.GetMouseButtonDown(1) &&
+                MapCameraGeometry.IsScreenPointInCameraViewport(targetCamera, mousePosition) &&
                 !TabletopPointerClassifier.IsBlockedByFlatHud(mousePosition) &&
                 MapCameraGeometry.TryScreenPointToPlane(targetCamera, mousePosition, tabletopPlane, out dragAnchorWorld))
             {
@@ -264,11 +308,14 @@ namespace YC.Presentation
 
             if (isDragging && Input.GetMouseButton(1))
             {
-                UpdateDrag(mousePosition);
+                if (!MapCameraGeometry.IsScreenPointInCameraViewport(targetCamera, mousePosition) ||
+                    TabletopPointerClassifier.IsBlockedByFlatHud(mousePosition)) EndDrag();
+                else UpdateDrag(mousePosition);
             }
 
             var wheelDelta = Input.mouseScrollDelta.y;
             if (Mathf.Abs(wheelDelta) <= InputEpsilon ||
+                !MapCameraGeometry.IsScreenPointInCameraViewport(targetCamera, mousePosition) ||
                 TabletopPointerClassifier.IsBlockedByFlatHud(mousePosition))
             {
                 return;

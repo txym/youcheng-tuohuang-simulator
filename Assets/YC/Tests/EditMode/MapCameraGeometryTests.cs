@@ -163,6 +163,63 @@ namespace YC.Tests.EditMode
         }
 
         [Test]
+        public void ResizingMapViewport_KeepsNavigationZoomAndRejectsOutsideScreenPoints()
+        {
+            var controllerType = Type.GetType("YC.Presentation.MapDisplayController, Assembly-CSharp", true);
+            var boundsType = Type.GetType("YC.Presentation.TabletopViewportNavigationBounds, Assembly-CSharp", true);
+            var mapObject = new GameObject("Viewport Map", typeof(SpriteRenderer));
+            var cameraObject = new GameObject("Viewport Camera", typeof(Camera));
+            Texture2D texture = null;
+            Sprite sprite = null;
+            mapObject.SetActive(false);
+            try
+            {
+                texture = new Texture2D(100, 60);
+                sprite = Sprite.Create(texture, new Rect(0f, 0f, 100f, 60f),
+                    Vector2.one * 0.5f, 10f);
+                var renderer = mapObject.GetComponent<SpriteRenderer>();
+                renderer.sprite = sprite;
+                var camera = cameraObject.GetComponent<Camera>();
+                var bounds = mapObject.AddComponent(boundsType);
+                var controller = mapObject.AddComponent(controllerType);
+                controllerType.GetField("mapRenderer", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .SetValue(controller, renderer);
+                controllerType.GetField("targetCamera", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .SetValue(controller, camera);
+                controllerType.GetField("navigationBoundsSource", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .SetValue(controller, bounds);
+                controllerType.GetMethod("FitCameraToMap", BindingFlags.Instance | BindingFlags.Public)
+                    .Invoke(controller, null);
+                var zoomField = controllerType.GetField("currentZoom", BindingFlags.Instance | BindingFlags.NonPublic);
+                var targetField = controllerType.GetField("targetZoom", BindingFlags.Instance | BindingFlags.NonPublic);
+                zoomField.SetValue(controller, 1.5f);
+                targetField.SetValue(controller, 1.8f);
+                controllerType.GetMethod("SetScreenViewport", BindingFlags.Instance | BindingFlags.Public)
+                    .Invoke(controller, new object[] { new Rect(0.2f, 0.15f, 0.6f, 0.7f) });
+
+                Assert.That((float)zoomField.GetValue(controller), Is.EqualTo(1.5f).Within(0.0001f));
+                Assert.That((float)targetField.GetValue(controller), Is.EqualTo(1.8f).Within(0.0001f));
+                Assert.That(camera.rect.xMin, Is.EqualTo(0.2f).Within(0.0001f));
+                Assert.That(camera.rect.yMin, Is.EqualTo(0.15f).Within(0.0001f));
+                Assert.That(camera.rect.width, Is.EqualTo(0.6f).Within(0.0001f));
+                Assert.That(camera.rect.height, Is.EqualTo(0.7f).Within(0.0001f));
+                var viewport = camera.pixelRect;
+                var inside = new object[] { camera, viewport.center };
+                var outside = new object[] { camera, new Vector2(viewport.xMin - 2f, viewport.center.y) };
+                var contains = GeometryType.GetMethod("IsScreenPointInCameraViewport");
+                Assert.That((bool)contains.Invoke(null, inside), Is.True);
+                Assert.That((bool)contains.Invoke(null, outside), Is.False);
+            }
+            finally
+            {
+                if (sprite != null) Object.DestroyImmediate(sprite);
+                if (texture != null) Object.DestroyImmediate(texture);
+                Object.DestroyImmediate(cameraObject);
+                Object.DestroyImmediate(mapObject);
+            }
+        }
+
+        [Test]
         public void Controller_DefaultsMatchTabletopNavigationContract()
         {
             var controllerType = Type.GetType("YC.Presentation.MapDisplayController, Assembly-CSharp", false);

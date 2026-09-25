@@ -35,7 +35,8 @@ namespace YC.Presentation
             Action onDispatch,
             Action onExplore,
             Action onMoveCity,
-            Action onEndRound)
+            Action onEndRound,
+            Action onBuild)
         {
             this.view = view;
             YC.PlayerJourney.PlayerAutomationId.Attach(view.PanelObject, "character.cover_slot");
@@ -43,6 +44,8 @@ namespace YC.Presentation
             YC.PlayerJourney.PlayerAutomationId.Attach(view.DispatchButton.gameObject, "action.dispatch");
             YC.PlayerJourney.PlayerAutomationId.Attach(view.ExploreButton.gameObject, "action.explore");
             YC.PlayerJourney.PlayerAutomationId.Attach(view.MoveCityButton.gameObject, "action.move");
+            if (view.BuildButton != null)
+                YC.PlayerJourney.PlayerAutomationId.Attach(view.BuildButton.gameObject, "action.build");
             YC.PlayerJourney.PlayerAutomationId.Attach(view.EndRoundButton.gameObject, "action.end");
             YC.PlayerJourney.PlayerAutomationId.Attach(view.UseCharacterButton.gameObject, "action.character");
             YC.PlayerJourney.PlayerAutomationId.Attach(view.CardPrimaryButton.gameObject, "action.character.strategy");
@@ -56,6 +59,7 @@ namespace YC.Presentation
             BindButton(view.DispatchButton, onDispatch);
             BindButton(view.ExploreButton, onExplore);
             BindButton(view.MoveCityButton, onMoveCity);
+            if (view.BuildButton != null) BindButton(view.BuildButton, onBuild);
             BindButton(view.EndRoundButton, onEndRound);
             BindButton(view.CardPrimaryButton, InvokeCardPrimaryAction);
             BindButton(view.CardSecondaryButton, InvokeCardSecondaryAction);
@@ -78,7 +82,8 @@ namespace YC.Presentation
             Action onDispatch,
             Action onExplore,
             Action onMoveCity,
-            Action onEndRound)
+            Action onEndRound,
+            Action onBuild = null)
         {
             var reason = string.Empty;
             if (view == null || cardVisualCatalog == null ||
@@ -99,7 +104,8 @@ namespace YC.Presentation
                 onDispatch,
                 onExplore,
                 onMoveCity,
-                onEndRound);
+                onEndRound,
+                onBuild);
         }
 
         public void SetHeader(string currentPlayer, string phase)
@@ -134,6 +140,8 @@ namespace YC.Presentation
             SetButtonInteractable(view.DispatchButton, canDispatch);
             SetButtonInteractable(view.ExploreButton, canExplore);
             SetButtonInteractable(view.MoveCityButton, canMoveCity);
+            if (view.BuildButton != null) SetButtonInteractable(view.BuildButton, canBuild);
+            if (view.SpecialButton != null) SetButtonInteractable(view.SpecialButton, false);
             SetButtonInteractable(view.EndRoundButton, canEndRound);
         }
 
@@ -476,6 +484,12 @@ namespace YC.Presentation
 
         private static void SetButtonInteractable(Button button, bool interactable)
         {
+            var mainState = button.GetComponent<UiMainButtonState>();
+            if (mainState != null)
+            {
+                mainState.SetAvailable(interactable);
+                return;
+            }
             button.interactable = interactable;
             var image = button.GetComponent<Image>();
             if (image != null)

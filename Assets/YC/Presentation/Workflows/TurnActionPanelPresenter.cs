@@ -196,6 +196,17 @@ namespace YC.Presentation.Workflows
                 return "当前没有可结束的回合。";
             }
 
+            if (state.HasPendingChoice())
+            {
+                return "请先处理待选择项。";
+            }
+
+            if (state.CurrentPlayerId != context.LocalPlayerId &&
+                state.Phase != GamePhase.Cleanup)
+            {
+                return "尚未轮到本机玩家结束行动。";
+            }
+
             if (state.Phase == GamePhase.ResourceCollection)
             {
                 return "当前玩家已经提交过采集，等待其他玩家。";

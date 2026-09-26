@@ -21,7 +21,6 @@ namespace YC.Presentation
         [SerializeField, Range(1f, 179f)] private float fieldOfView = 45f;
         [SerializeField] private Rect tabletopViewport = new Rect(0.02865f, 0f, 0.78385f, 1f);
         [SerializeField] private Rect cameraViewport = new Rect(0f, 0f, 1f, 1f);
-        [SerializeField, Range(1f, 1.5f)] private float framedViewportZoom = 1.2f;
 
         [Header("Navigation")]
         [SerializeField, Range(0.1f, 1f)] private float minZoom = 0.9f;
@@ -158,7 +157,7 @@ namespace YC.Presentation
 
             currentZoom = preserveNavigation
                 ? Mathf.Clamp(previousZoom, minZoom, maxZoom)
-                : Mathf.Clamp(cameraViewport.width < .99f ? framedViewportZoom : 1f, minZoom, maxZoom);
+                : minZoom;
             targetZoom = currentZoom;
             zoomVelocity = 0f;
             hasZoomAnchor = false;

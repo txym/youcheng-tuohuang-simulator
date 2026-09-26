@@ -190,6 +190,10 @@ namespace YC.Tests.EditMode
                     .SetValue(controller, bounds);
                 controllerType.GetMethod("FitCameraToMap", BindingFlags.Instance | BindingFlags.Public)
                     .Invoke(controller, null);
+                controllerType.GetMethod("SetScreenViewport", BindingFlags.Instance | BindingFlags.Public)
+                    .Invoke(controller, new object[] { new Rect(0.1f, 0.1f, 0.8f, 0.8f) });
+                AssertField(controllerType, controller, "currentZoom", 0.9f);
+                AssertField(controllerType, controller, "targetZoom", 0.9f);
                 var zoomField = controllerType.GetField("currentZoom", BindingFlags.Instance | BindingFlags.NonPublic);
                 var targetField = controllerType.GetField("targetZoom", BindingFlags.Instance | BindingFlags.NonPublic);
                 zoomField.SetValue(controller, 1.5f);
@@ -299,8 +303,8 @@ namespace YC.Tests.EditMode
                     .GetValue(controller);
                 Assert.That(focusPoint, Is.EqualTo(Vector3.zero));
                 Assert.That(panOrigin, Is.EqualTo(Vector3.zero));
-                AssertField(controllerType, controller, "currentZoom", 1f);
-                AssertField(controllerType, controller, "targetZoom", 1f);
+                AssertField(controllerType, controller, "currentZoom", 0.9f);
+                AssertField(controllerType, controller, "targetZoom", 0.9f);
 
                 controllerType.GetField("currentZoom", BindingFlags.Instance | BindingFlags.NonPublic)
                     .SetValue(controller, 0.9f);
